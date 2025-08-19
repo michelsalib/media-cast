@@ -5,7 +5,7 @@ import {
   Stack,
   ThemeProvider,
   Toolbar,
-  Typography
+  Typography,
 } from '@mui/material';
 import CssBaseline from '@mui/material/CssBaseline';
 import { useState } from 'react';

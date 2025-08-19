@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
 declare module 'castv2-client' {
   import type { EventEmitter } from 'node:stream';
 
