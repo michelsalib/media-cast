@@ -1,5 +1,6 @@
 import {
   AppBar,
+  Box,
   Collapse,
   createTheme,
   Stack,
@@ -11,6 +12,7 @@ import CssBaseline from '@mui/material/CssBaseline';
 import { useState } from 'react';
 import { Connector } from './components/Connector';
 import Dropper from './components/Dropper';
+import FfmpegInfoButton from './components/FfmpegInfoButton';
 import Player from './components/Player';
 
 const darkTheme = createTheme({
@@ -28,9 +30,12 @@ function App(): React.JSX.Element {
         <Stack sx={{ height: '100%' }}>
           <AppBar position="relative" sx={{ appRegion: 'drag' }}>
             <Toolbar variant="dense" sx={{ minHeight: 'inherit', height: '32px' }}>
-              <Typography variant="h6" sx={{ fontSize: 12 }}>
+              <Typography variant="h6" sx={{ fontSize: 12, flexGrow: 1 }}>
                 Media Cast
               </Typography>
+              <FfmpegInfoButton />
+              {/* Spacer for the Windows/Linux titleBarOverlay window controls. */}
+              <Box sx={{ width: '150px', flexShrink: 0 }} />
             </Toolbar>
           </AppBar>
           <Dropper connected={connected}>

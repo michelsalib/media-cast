@@ -5,7 +5,7 @@ import icon from '../../resources/icon.png?asset';
 import type { Device, Renderer } from '../shared/types';
 import { type ChromecastDevice, ChromecastDevicesScanner } from './ChromecastDevicesScanner';
 import { CastPlayer } from './castPlayer';
-import { probe, thumbnail } from './ffmpeg';
+import { getFfmpegInfo, probe, thumbnail } from './ffmpeg';
 import { MediaServer } from './MediaServer';
 import { extractSubtitles } from './subtitleExtractor';
 import { type UpnpDevice, UpnpDevicesScanner } from './UpnpDevicesScanner';
@@ -108,6 +108,8 @@ app.whenReady().then(() => {
   ipcMain.on('status', () => renderer?.getStatus());
 
   ipcMain.handle('probe', (_event, path: string) => probe(path));
+
+  ipcMain.handle('ffmpegInfo', () => getFfmpegInfo());
 
   ipcMain.handle('thumbnail', (_event, path: string, width?: number, height?: number) =>
     thumbnail(path, width, height)

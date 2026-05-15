@@ -16,6 +16,12 @@ export interface Device {
   ip?: string;
 }
 
+export interface FfmpegInfo {
+  ffmpegPath: string;
+  ffprobePath: string;
+  version: string;
+}
+
 export interface LoadVideoOptions {
   title: string;
   videoUrl: string;

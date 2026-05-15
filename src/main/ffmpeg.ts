@@ -1,6 +1,25 @@
 import { execFile, spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 import type { Readable } from 'node:stream';
 import { promisify } from 'node:util';
+import { app } from 'electron';
+import type { FfmpegInfo } from '../shared/types';
+
+// Binaries live under resources/bin/<platform>-<arch>/. In dev that's <projectRoot>/resources/bin/,
+// in packaged builds it's <process.resourcesPath>/bin/ (via electron-builder extraResources).
+// Falls back to whatever's on PATH if no bundled binary is found.
+function resolveBundledBinary(name: 'ffmpeg' | 'ffprobe'): string | undefined {
+  const binDir = app.isPackaged
+    ? path.join(process.resourcesPath, 'bin')
+    : path.join(app.getAppPath(), 'resources', 'bin');
+  const ext = process.platform === 'win32' ? '.exe' : '';
+  const fullPath = path.join(binDir, `${process.platform}-${process.arch}`, `${name}${ext}`);
+  return existsSync(fullPath) ? fullPath : undefined;
+}
+
+const ffmpegPath = resolveBundledBinary('ffmpeg') ?? 'ffmpeg';
+const ffprobePath = resolveBundledBinary('ffprobe') ?? 'ffprobe';
 
 export interface FFProbeData {
   streams: {
@@ -39,7 +58,7 @@ export async function extractSubtitles(
   format: SubtitleFormat = 'vtt'
 ): Promise<Buffer> {
   const { stdout } = await promisify(execFile)(
-    'ffmpeg',
+    ffmpegPath,
     ['-i', videoPath, '-map', `0:s:${track}`, '-f', muxerFor(format), 'pipe:1'],
     {
       encoding: 'buffer',
@@ -54,7 +73,7 @@ export async function convertSubtitles(
   format: SubtitleFormat = 'vtt'
 ): Promise<Buffer> {
   const { stdout } = await promisify(execFile)(
-    'ffmpeg',
+    ffmpegPath,
     ['-i', subtitlepath, '-f', muxerFor(format), 'pipe:1'],
     {
       encoding: 'buffer',
@@ -64,11 +83,18 @@ export async function convertSubtitles(
   return stdout;
 }
 
+export async function getFfmpegInfo(): Promise<FfmpegInfo> {
+  const { stdout } = await promisify(execFile)(ffmpegPath, ['-version']);
+  // First line: e.g. "ffmpeg version 7.0 Copyright (c) 2000-2024 the FFmpeg developers"
+  const version = stdout.split('\n')[0].trim();
+  return { ffmpegPath, ffprobePath, version };
+}
+
 export async function probe(videoPath: string): Promise<FFProbeData> {
-  const data = await promisify(execFile)('ffprobe', [
+  const data = await promisify(execFile)(ffprobePath, [
     '-v',
     'quiet',
-    '-output_format',
+    '-print_format',
     'json',
     '-show_format',
     '-show_streams',
@@ -191,7 +217,7 @@ export function transcodeToMpegTs(options: TranscodeOptions): TranscodeHandle {
     'pipe:1'
   );
 
-  const ffmpeg = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+  const ffmpeg = spawn(ffmpegPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
 
   let stderrTail = '';
   ffmpeg.stderr?.on('data', (chunk: Buffer) => {
