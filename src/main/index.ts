@@ -1,6 +1,7 @@
 import { basename, join } from 'node:path';
 import { electronApp, is, optimizer } from '@electron-toolkit/utils';
 import { app, BrowserWindow, ipcMain, shell } from 'electron';
+import { autoUpdater } from 'electron-updater';
 import icon from '../../resources/icon.png?asset';
 import type { Device, Renderer } from '../shared/types';
 import { type ChromecastDevice, ChromecastDevicesScanner } from './ChromecastDevicesScanner';
@@ -55,6 +56,10 @@ function createWindow(): BrowserWindow {
 
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.electron');
+
+  if (!is.dev) {
+    autoUpdater.checkForUpdatesAndNotify().catch((err) => console.error('update check failed:', err));
+  }
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window);
