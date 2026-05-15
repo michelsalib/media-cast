@@ -4,6 +4,7 @@ out
 .DS_Store
 .eslintcache
 *.log*
+*.tsbuildinfo
 
 # Bundled ffmpeg/ffprobe binaries — too big for git. See resources/bin/README.md.
 resources/bin/**/ffmpeg

@@ -18,6 +18,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { NO_SUBTITLES, type SubtitlesSelection } from './SubtitlesSelection';
 import SubtitlesSelector from './SubtitlesSelector';
+import VideoInfoButton from './VideoInfoButton';
 
 type Props = SxProps & {
   children: React.JSX.Element;
@@ -325,6 +326,12 @@ export default function Dropper(props: Props): React.JSX.Element {
                 onChange={setSubtitlesSelection}
               />
             </Stack>
+            {video && (
+              <VideoInfoButton
+                video={video}
+                sx={{ position: 'absolute', top: 8, right: 8 }}
+              />
+            )}
           </Box>
         </AccordionDetails>
         <AccordionActions sx={{ px: 2.5, pb: 2 }}>

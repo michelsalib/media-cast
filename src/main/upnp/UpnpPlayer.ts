@@ -37,6 +37,13 @@ export class UpnpPlayer implements Renderer {
 
   async close(): Promise<void> {
     await soapCall(this.controlUrl, 'Stop', { InstanceID: '0' }).catch(() => {});
+    // Stop alone leaves the video loaded on most DLNA renderers (TV still shows the title /
+    // last frame). Clearing the AVTransport URI is what actually unloads it.
+    await soapCall(this.controlUrl, 'SetAVTransportURI', {
+      InstanceID: '0',
+      CurrentURI: '',
+      CurrentURIMetaData: '',
+    }).catch(() => {});
     await this.eventing.stop();
   }
 
