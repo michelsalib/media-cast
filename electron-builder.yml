@@ -50,3 +50,4 @@ publish:
   provider: github
   owner: michelsalib
   repo: media-cast
+  releaseType: release
