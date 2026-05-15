@@ -1,4 +1,5 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import type { Readable } from 'node:stream';
 import { promisify } from 'node:util';
 
 export interface FFProbeData {
@@ -7,6 +8,8 @@ export interface FFProbeData {
     codec_name: string;
     codec_long_name: string;
     codec_type: 'subtitle' | 'audio' | 'video';
+    width?: number;
+    height?: number;
     tags: {
       language?: string;
       title?: string;
@@ -23,10 +26,21 @@ export interface FFProbeData {
   };
 }
 
-export async function extractSubtitles(videoPath: string, track: number): Promise<Buffer> {
+export type SubtitleFormat = 'vtt' | 'srt' | 'smi';
+
+function muxerFor(format: SubtitleFormat): string {
+  // ffmpeg has no SMI muxer; for 'smi' we produce SRT and convert downstream.
+  return format === 'vtt' ? 'webvtt' : 'srt';
+}
+
+export async function extractSubtitles(
+  videoPath: string,
+  track: number,
+  format: SubtitleFormat = 'vtt'
+): Promise<Buffer> {
   const { stdout } = await promisify(execFile)(
     'ffmpeg',
-    ['-i', videoPath, '-map', `0:s:${track}`, '-f', 'webvtt', 'pipe:1'],
+    ['-i', videoPath, '-map', `0:s:${track}`, '-f', muxerFor(format), 'pipe:1'],
     {
       encoding: 'buffer',
     }
@@ -35,10 +49,13 @@ export async function extractSubtitles(videoPath: string, track: number): Promis
   return stdout;
 }
 
-export async function convertSubtitles(subtitlepath: string): Promise<Buffer> {
+export async function convertSubtitles(
+  subtitlepath: string,
+  format: SubtitleFormat = 'vtt'
+): Promise<Buffer> {
   const { stdout } = await promisify(execFile)(
     'ffmpeg',
-    ['-i', subtitlepath, '-f', 'webvtt', 'pipe:1'],
+    ['-i', subtitlepath, '-f', muxerFor(format), 'pipe:1'],
     {
       encoding: 'buffer',
     }
@@ -84,4 +101,152 @@ export async function thumbnail(videoPath: string, width = 800, height = 600): P
   );
 
   return data.stdout;
+}
+
+export type BurnSubtitles =
+  | { source: 'external'; path: string }
+  | { source: 'internal'; videoPath: string; trackIndex: number };
+
+export interface VideoSize {
+  width: number;
+  height: number;
+}
+
+export interface TranscodeOptions {
+  videoPath: string;
+  seekSeconds?: number;
+  burnSubtitles?: BurnSubtitles;
+  videoSize?: VideoSize;
+}
+
+export interface TranscodeHandle {
+  stream: Readable;
+  kill: () => void;
+}
+
+/**
+ * Transcodes any video to H.264 + AAC in an MPEG-TS stream piped on stdout.
+ * Tuned for old DLNA TV decoders: High@4.0, no sliced threading, closed pix_fmt.
+ * Returns a Readable for the caller to pipe somewhere, plus a kill function.
+ */
+export function transcodeToMpegTs(options: TranscodeOptions): TranscodeHandle {
+  const { videoPath, seekSeconds = 0, burnSubtitles, videoSize } = options;
+
+  const args: string[] = [];
+  if (seekSeconds > 0) {
+    // -copyts keeps the original input PTS through the pipeline so the subtitles filter
+    // overlays the right cue and the renderer reports the real position.
+    args.push('-ss', String(seekSeconds), '-copyts');
+  }
+  args.push('-i', videoPath);
+
+  // Crop a few rows from the bottom — removes a glitchy edge row that x264 sometimes
+  // produces. Subtitles are placed after the crop so libass scales against the actual
+  // rendered height.
+  const cropBottom = 4;
+  const filters: string[] = [`crop=iw:ih-${cropBottom}:0:0`];
+  if (burnSubtitles) {
+    const adjustedSize = videoSize
+      ? { width: videoSize.width, height: videoSize.height - cropBottom }
+      : undefined;
+    filters.push(buildSubtitlesFilter(burnSubtitles, adjustedSize));
+  }
+  args.push('-vf', filters.join(','));
+
+  args.push(
+    '-map',
+    '0:v:0',
+    '-map',
+    '0:a:0?',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'veryfast',
+    '-profile:v',
+    'high',
+    '-level',
+    '4.0',
+    '-pix_fmt',
+    'yuv420p',
+    '-g',
+    '60',
+    // Disable sliced threading: per-slice corruption on weak decoders shows as a band of
+    // garbage (~1/4 of the screen). Frame-level threading still works.
+    '-x264-params',
+    'sliced-threads=0',
+    '-c:a',
+    'aac',
+    '-ar',
+    '48000',
+    '-ac',
+    '2',
+    '-b:a',
+    '192k',
+    '-f',
+    'mpegts',
+    '-muxdelay',
+    '0',
+    '-muxpreload',
+    '0',
+    'pipe:1'
+  );
+
+  const ffmpeg = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+
+  let stderrTail = '';
+  ffmpeg.stderr?.on('data', (chunk: Buffer) => {
+    const text = chunk.toString();
+    console.log('[ffmpeg]', text.trimEnd());
+    stderrTail = (stderrTail + text).slice(-2000);
+  });
+
+  ffmpeg.on('error', (err) => {
+    console.error('[ffmpeg] spawn error', err);
+  });
+
+  ffmpeg.on('exit', (code, signal) => {
+    if (code !== 0 && signal !== 'SIGKILL') {
+      console.error(`[ffmpeg] exit code=${code} signal=${signal}\n${stderrTail}`);
+    }
+  });
+
+  if (!ffmpeg.stdout) {
+    throw new Error('ffmpeg stdout is not piped');
+  }
+
+  return {
+    stream: ffmpeg.stdout,
+    kill: () => {
+      if (!ffmpeg.killed) {
+        ffmpeg.kill('SIGKILL');
+      }
+    },
+  };
+}
+
+function buildSubtitlesFilter(spec: BurnSubtitles, videoSize: VideoSize | undefined): string {
+  const path = spec.source === 'external' ? spec.path : spec.videoPath;
+  const parts = [`filename=${escapeFilterPath(path)}`];
+  if (spec.source === 'internal') {
+    parts.push(`si=${spec.trackIndex}`);
+  }
+  if (videoSize) {
+    // libass uses original_size as the reference for font scaling. Default (384x288)
+    // makes subs tiny on HD content.
+    parts.push(`original_size=${videoSize.width}x${videoSize.height}`);
+  }
+  // 1.5x the libass default (16) for legibility on the TV from across the room.
+  parts.push('force_style=FontSize=24');
+  return `subtitles=${parts.join(':')}`;
+}
+
+function escapeFilterPath(p: string): string {
+  // ffmpeg has nested escape contexts. Backslash-escape twice:
+  //   1. option-value level: `:` `'` `\` are special
+  //   2. filtergraph level:  `\` `'` `[` `]` `,` `;` are special
+  // We apply the inner level first so the `\` added by the inner gets re-escaped by the outer.
+  let s = p.replace(/\\/g, '/');
+  s = s.replace(/[\\:']/g, (c) => `\\${c}`);
+  s = s.replace(/[\\[\]',;]/g, (c) => `\\${c}`);
+  return s;
 }

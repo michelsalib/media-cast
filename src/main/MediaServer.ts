@@ -1,18 +1,23 @@
-import { type ChildProcess, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { promisify } from 'node:util';
 import send from 'send';
+import { type BurnSubtitles, transcodeToMpegTs, type VideoSize } from './ffmpeg';
 import { pickLocalIpFor } from './network';
+
+export type { BurnSubtitles, VideoSize } from './ffmpeg';
 
 export interface ServeVideoOptions {
   transcode?: boolean;
   targetIp: string;
   duration?: number;
+  burnSubtitles?: BurnSubtitles;
+  videoSize?: VideoSize;
 }
 
 export interface ServeSubtitlesOptions {
   targetIp: string;
+  format: 'vtt' | 'srt' | 'smi';
 }
 
 export class MediaServer {
@@ -20,7 +25,10 @@ export class MediaServer {
   private currentVideoPath?: string;
   private currentVideoTranscode = false;
   private currentDuration?: number;
+  private currentBurnSubtitles?: BurnSubtitles;
+  private currentVideoSize?: VideoSize;
   private currentSubtitlesData?: Buffer;
+  private currentSubtitlesFormat: 'vtt' | 'srt' | 'smi' = 'vtt';
   private sessionHash = randomUUID();
 
   constructor(private readonly port: number) {
@@ -35,7 +43,13 @@ export class MediaServer {
       return;
     }
 
-    if (req.url?.startsWith(`/${this.sessionHash}/video`) && !req.url.endsWith('/subs')) {
+    const videoPaths = [
+      `/${this.sessionHash}/video`,
+      `/${this.sessionHash}/video.ts`,
+      `/${this.sessionHash}/video.mp4`,
+      `/${this.sessionHash}/video.mpg`,
+    ];
+    if (req.url && videoPaths.includes(req.url)) {
       if (this.currentVideoTranscode) {
         this.handleTranscodedVideo(req, res, this.currentVideoPath);
       } else {
@@ -44,17 +58,34 @@ export class MediaServer {
       return;
     }
 
-    if (req.url === `/${this.sessionHash}/subs`) {
+    // Subtitle paths: both subs.* and video.* (sidecar pattern many old TVs sniff for).
+    const subsPaths = [
+      `/${this.sessionHash}/subs`,
+      `/${this.sessionHash}/subs.vtt`,
+      `/${this.sessionHash}/subs.srt`,
+      `/${this.sessionHash}/subs.smi`,
+      `/${this.sessionHash}/video.vtt`,
+      `/${this.sessionHash}/video.srt`,
+      `/${this.sessionHash}/video.smi`,
+    ];
+    if (req.url && subsPaths.includes(req.url)) {
       if (!this.currentSubtitlesData) {
         res.writeHead(404);
         res.end('No subtitles data set');
         return;
       }
 
+      const contentType =
+        this.currentSubtitlesFormat === 'smi'
+          ? 'application/smil;charset=iso-8859-1'
+          : this.currentSubtitlesFormat === 'srt'
+            ? 'application/x-subrip;charset=iso-8859-1'
+            : 'text/vtt;charset=utf-8';
+
       res.writeHead(200, {
         'Access-Control-Allow-Origin': '*',
         'content-length': this.currentSubtitlesData.length,
-        'content-type': 'text/vtt;charset=utf-8',
+        'content-type': contentType,
       });
 
       res.end(this.currentSubtitlesData);
@@ -79,81 +110,18 @@ export class MediaServer {
       return;
     }
 
-    const args: string[] = [];
-    if (seekSeconds > 0) {
-      args.push('-ss', String(seekSeconds));
-    }
-    args.push('-i', videoPath);
-    if (seekSeconds > 0) {
-      // Make the output PTS start at the seek offset, so the renderer reports
-      // the real position instead of restarting its counter at 0.
-      args.push('-output_ts_offset', String(seekSeconds));
-    }
-    args.push(
-      '-map',
-      '0:v:0',
-      '-map',
-      '0:a:0?',
-      '-c:v',
-      'libx264',
-      '-preset',
-      'veryfast',
-      '-tune',
-      'zerolatency',
-      '-profile:v',
-      'high',
-      '-level',
-      '4.0',
-      '-pix_fmt',
-      'yuv420p',
-      '-g',
-      '60',
-      '-c:a',
-      'aac',
-      '-ar',
-      '48000',
-      '-ac',
-      '2',
-      '-b:a',
-      '192k',
-      '-f',
-      'mpegts',
-      '-muxdelay',
-      '0',
-      '-muxpreload',
-      '0',
-      'pipe:1'
-    );
-
-    const ffmpeg: ChildProcess = spawn('ffmpeg', args, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
-    let stderrTail = '';
-    ffmpeg.stderr?.on('data', (chunk: Buffer) => {
-      const text = chunk.toString();
-      console.log('[ffmpeg]', text.trimEnd());
-      stderrTail = (stderrTail + text).slice(-2000);
+    const handle = transcodeToMpegTs({
+      videoPath,
+      seekSeconds,
+      burnSubtitles: this.currentBurnSubtitles,
+      videoSize: this.currentVideoSize,
     });
 
     res.writeHead(200, transcodedHeaders(this.currentDuration, seekSeconds));
+    handle.stream.pipe(res);
+    handle.stream.on('error', () => res.destroy());
 
-    ffmpeg.stdout?.pipe(res);
-    ffmpeg.on('error', (err) => {
-      console.error('[ffmpeg] spawn error', err);
-      res.destroy();
-    });
-    ffmpeg.on('exit', (code, signal) => {
-      if (code !== 0 && signal !== 'SIGKILL') {
-        console.error(`[ffmpeg] exit code=${code} signal=${signal}\n${stderrTail}`);
-      }
-    });
-
-    const cleanup = (): void => {
-      if (!ffmpeg.killed) {
-        ffmpeg.kill('SIGKILL');
-      }
-    };
+    const cleanup = (): void => handle.kill();
     req.on('close', cleanup);
     res.on('close', cleanup);
   }
@@ -166,6 +134,8 @@ export class MediaServer {
     this.currentVideoPath = videoPath;
     this.currentVideoTranscode = options.transcode ?? false;
     this.currentDuration = options.duration;
+    this.currentBurnSubtitles = options.burnSubtitles;
+    this.currentVideoSize = options.videoSize;
     const filename = options.transcode ? 'video.ts' : 'video';
     const ip = pickLocalIpFor(options.targetIp);
     return `http://${ip}:${this.port}/${this.sessionHash}/${filename}`;
@@ -173,8 +143,10 @@ export class MediaServer {
 
   serveSubtitles(subtitlesData: Buffer, options: ServeSubtitlesOptions): string {
     this.currentSubtitlesData = subtitlesData;
+    this.currentSubtitlesFormat = options.format;
     const ip = pickLocalIpFor(options.targetIp);
-    return `http://${ip}:${this.port}/${this.sessionHash}/subs`;
+    // Use the sidecar pattern (same basename as video) — old Samsung TVs match this implicitly.
+    return `http://${ip}:${this.port}/${this.sessionHash}/video.${options.format}`;
   }
 }
 

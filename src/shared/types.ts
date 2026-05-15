@@ -20,6 +20,7 @@ export interface LoadVideoOptions {
   title: string;
   videoUrl: string;
   subtitlesUrl?: string;
+  subtitlesFormat?: 'vtt' | 'srt' | 'smi';
   duration?: number;
 }
 

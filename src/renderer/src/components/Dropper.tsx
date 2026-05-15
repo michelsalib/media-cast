@@ -43,15 +43,16 @@ export default function Dropper(props: Props): React.JSX.Element {
 
   function drop(event: React.DragEvent): void {
     event.preventDefault();
-    const file = event.dataTransfer.files[0];
 
-    // video drop
-    if (file.name.endsWith('mp4') || file.name.endsWith('mkv')) {
-      setVideo(file);
-    }
-    // subdrop
-    else {
-      setSubs(file);
+    for (const file of event.dataTransfer.files) {
+      // video drop
+      if (file.name.endsWith('mp4') || file.name.endsWith('mkv')) {
+        setVideo(file);
+      }
+      // subdrop
+      else {
+        setSubs(file);
+      }
     }
 
     setIsOver(false);

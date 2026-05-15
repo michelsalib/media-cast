@@ -40,11 +40,17 @@ export class UpnpPlayer implements Renderer {
     await this.eventing.stop();
   }
 
-  async loadVideo({ title, videoUrl, subtitlesUrl, duration }: LoadVideoOptions): Promise<void> {
+  async loadVideo({
+    title,
+    videoUrl,
+    subtitlesUrl,
+    subtitlesFormat,
+    duration,
+  }: LoadVideoOptions): Promise<void> {
     this.currentTitle = title;
     this.duration = duration;
     this.currentTime = 0;
-    const metadata = buildDidlMetadata(title, videoUrl, subtitlesUrl, duration);
+    const metadata = buildDidlMetadata(title, videoUrl, subtitlesUrl, subtitlesFormat, duration);
     await soapCall(this.controlUrl, 'SetAVTransportURI', {
       InstanceID: '0',
       CurrentURI: videoUrl,
@@ -201,12 +207,19 @@ function buildDidlMetadata(
   title: string,
   videoUrl: string,
   subtitlesUrl?: string,
+  subtitlesFormat: 'vtt' | 'srt' | 'smi' = 'smi',
   duration?: number
 ): string {
+  const subMime =
+    subtitlesFormat === 'smi'
+      ? 'application/smil'
+      : subtitlesFormat === 'srt'
+        ? 'application/x-subrip'
+        : 'text/vtt';
   const captionInfo = subtitlesUrl
-    ? `<sec:CaptionInfoEx sec:type="vtt">${escapeXml(subtitlesUrl)}</sec:CaptionInfoEx>` +
-      `<sec:CaptionInfo sec:type="vtt">${escapeXml(subtitlesUrl)}</sec:CaptionInfo>` +
-      `<res protocolInfo="http-get:*:text/vtt:*">${escapeXml(subtitlesUrl)}</res>`
+    ? `<sec:CaptionInfoEx sec:type="${subtitlesFormat}">${escapeXml(subtitlesUrl)}</sec:CaptionInfoEx>` +
+      `<sec:CaptionInfo sec:type="${subtitlesFormat}">${escapeXml(subtitlesUrl)}</sec:CaptionInfo>` +
+      `<res protocolInfo="http-get:*:${subMime}:*">${escapeXml(subtitlesUrl)}</res>`
     : '';
 
   // MPEG-TS container — old Samsung TVs handle this far better than fragmented MP4.
@@ -216,17 +229,23 @@ function buildDidlMetadata(
 
   const durationAttr =
     duration && Number.isFinite(duration) ? ` duration="${secondsToHmsMs(duration)}"` : '';
+  // pv:subtitleFileUri / Type — non-standard attrs many old DLNA TVs (incl. Samsung) actually honor
+  // for sidecar subtitles, in addition to / instead of sec:CaptionInfoEx.
+  const pvSubsAttrs = subtitlesUrl
+    ? ` pv:subtitleFileUri="${escapeXml(subtitlesUrl)}" pv:subtitleFileType="${subtitlesFormat}"`
+    : '';
 
   return (
     `<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" ` +
     `xmlns:dc="http://purl.org/dc/elements/1.1/" ` +
     `xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" ` +
-    `xmlns:sec="http://www.sec.co.kr/">` +
+    `xmlns:sec="http://www.sec.co.kr/" ` +
+    `xmlns:pv="http://www.pv.com/pvns/">` +
     `<item id="1" parentID="0" restricted="1">` +
     `<dc:title>${escapeXml(title)}</dc:title>` +
     `<upnp:class>object.item.videoItem.movie</upnp:class>` +
     `<upnp:storageMedium>UNKNOWN</upnp:storageMedium>` +
-    `<res protocolInfo="${videoProtocolInfo}"${durationAttr}>${escapeXml(videoUrl)}</res>` +
+    `<res protocolInfo="${videoProtocolInfo}"${durationAttr}${pvSubsAttrs}>${escapeXml(videoUrl)}</res>` +
     captionInfo +
     `</item>` +
     `</DIDL-Lite>`

@@ -157,28 +157,54 @@ app.whenReady().then(() => {
     }
 
     try {
-      const [subtitlesData, probeData] = await Promise.all([
-        extractSubtitles(videoPath, subtitlesPathOrIndex),
-        probe(videoPath),
-      ]);
-
-      const duration = Number(probeData.format.duration);
       const targetIp = device.ip;
-      const transcode = device.type === 'upnp';
+      const probeData = await probe(videoPath);
+      const rawDuration = Number(probeData.format.duration);
+      const duration = Number.isFinite(rawDuration) ? rawDuration : undefined;
+      const title = basename(videoPath);
+      const videoStream = probeData.streams.find((s) => s.codec_type === 'video');
+      const videoSize =
+        videoStream?.width && videoStream?.height
+          ? { width: videoStream.width, height: videoStream.height }
+          : undefined;
+
+      if (device.type === 'upnp') {
+        // Burn subtitles into the video stream — most reliable on old DLNA TVs.
+        const burnSubtitles =
+          subtitlesPathOrIndex === undefined
+            ? undefined
+            : typeof subtitlesPathOrIndex === 'number'
+              ? ({ source: 'internal', videoPath, trackIndex: subtitlesPathOrIndex } as const)
+              : ({ source: 'external', path: subtitlesPathOrIndex } as const);
+
+        const videoUrl = server.serveVideo(videoPath, {
+          transcode: true,
+          targetIp,
+          duration,
+          burnSubtitles,
+          videoSize,
+        });
+        await renderer.loadVideo({ title, videoUrl, duration });
+        return;
+      }
+
+      // Chromecast path: pass video direct, sidecar WebVTT subs.
+      const subtitlesData = await extractSubtitles(videoPath, subtitlesPathOrIndex, 'vtt');
       const videoUrl = server.serveVideo(videoPath, {
-        transcode,
+        transcode: false,
         targetIp,
-        duration: Number.isFinite(duration) ? duration : undefined,
+        duration,
       });
       const subtitlesUrl = subtitlesData
-        ? server.serveSubtitles(subtitlesData, { targetIp })
+        ? server.serveSubtitles(subtitlesData, { targetIp, format: 'vtt' })
         : undefined;
 
       await renderer.loadVideo({
-        title: basename(videoPath),
+        title,
         videoUrl,
         subtitlesUrl,
-        duration: Number.isFinite(duration) ? duration : undefined,
+        subtitlesFormat: 'vtt',
+        duration,
       });
     } catch (err) {
       console.error('load failed:', err);
