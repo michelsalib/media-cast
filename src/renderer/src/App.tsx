@@ -34,9 +34,9 @@ function App(): React.JSX.Element {
             </Toolbar>
           </AppBar>
           <Dropper connected={connected}>
-            <Stack spacing={5} margin={5}>
+            <Stack spacing={5} sx={{ margin: 5 }}>
               <Collapse in={!connected} unmountOnExit>
-                <Connector onChange={(s) => setConnected(s == 'CONNECTED')}></Connector>
+                <Connector onChange={(s) => setConnected(s === 'CONNECTED')}></Connector>
               </Collapse>
               <Collapse in={connected}>
                 <Player onDisconnect={() => setConnected(false)}></Player>

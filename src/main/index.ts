@@ -1,10 +1,10 @@
+import { basename, join } from 'node:path';
 import { electronApp, is, optimizer } from '@electron-toolkit/utils';
 import { app, BrowserWindow, ipcMain, shell } from 'electron';
-import { join } from 'path';
 import icon from '../../resources/icon.png?asset';
-import { CastPlayer } from './castPlayer';
 import { ChromecastDevicesScanner } from './ChromecastDevicesScanner';
-import { probe, thumbail } from './ffmpeg';
+import { CastPlayer } from './castPlayer';
+import { probe, thumbnail } from './ffmpeg';
 import { MediaServer } from './MediaServer';
 import { extractSubtitles } from './subtitleExtractor';
 
@@ -42,8 +42,8 @@ function createWindow(): BrowserWindow {
 
   // HMR for renderer base on electron-vite cli.
   // Load the remote URL for development or the local html file for production.
-  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL']);
+  if (is.dev && process.env.ELECTRON_RENDERER_URL) {
+    mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'));
   }
@@ -65,7 +65,7 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window);
   });
 
-  app.on('activate', function () {
+  app.on('activate', () => {
     // On macOS it's common to re-create a window in the app when the
     // dock icon is clicked and there are no other windows open.
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -77,23 +77,21 @@ app.whenReady().then(() => {
   const chromecastScanner = new ChromecastDevicesScanner();
   const server = new MediaServer(port);
 
-  ipcMain.on('scan', () =>
-    chromecastScanner.onDevices((devices) => {
-      mainWindow.webContents.send('scan', devices);
-    })
-  );
+  chromecastScanner.onDevices((devices) => {
+    mainWindow.webContents.send('scan', devices);
+  });
+  ipcMain.on('scan', () => chromecastScanner.refresh());
 
   ipcMain.on('status', () => chromecast?.getStatus());
-  chromecast?.onStatus((s) => mainWindow.webContents.send('status', s));
 
   ipcMain.handle('probe', (_event, path: string) => probe(path));
 
   ipcMain.handle('thumbnail', (_event, path: string, width?: number, height?: number) =>
-    thumbail(path, width, height)
+    thumbnail(path, width, height)
   );
 
   ipcMain.handle('connect', async (_event, ip) => {
-    if (ip == chromecast?.host) {
+    if (ip === chromecast?.host) {
       return;
     }
 
@@ -121,7 +119,7 @@ app.whenReady().then(() => {
     const videoUrl = server.serveVideo(videoPath);
     const subtitlesUrl = subtitlesData ? server.serveSubtitles(subtitlesData) : undefined;
 
-    chromecast.loadVideo(videoPath.split('\\').pop()!, videoUrl, subtitlesUrl);
+    chromecast.loadVideo(basename(videoPath), videoUrl, subtitlesUrl);
   });
 
   ipcMain.on('seek', (_evt, time) => chromecast?.seek(time));

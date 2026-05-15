@@ -11,13 +11,13 @@ import {
   CardContent,
   CardMedia,
   Stack,
-  SxProps,
+  type SxProps,
   Tooltip,
   Typography,
   useTheme,
 } from '@mui/material';
 import { useEffect, useState } from 'react';
-import { NO_SUBTITLES, SubtitlesSelection } from './SubtitlesSelection';
+import { NO_SUBTITLES, type SubtitlesSelection } from './SubtitlesSelection';
 import SubtitlesSelector from './SubtitlesSelector';
 
 type Props = SxProps & {
@@ -71,9 +71,9 @@ export default function Dropper(props: Props): React.JSX.Element {
   function cast(event: React.MouseEvent): void {
     event.stopPropagation();
     if (video) {
-      if (subtitlesSelection.type == 'external') {
+      if (subtitlesSelection.type === 'external') {
         window.api.load(video, subtitlesSelection.file);
-      } else if (subtitlesSelection.type == 'internal') {
+      } else if (subtitlesSelection.type === 'internal') {
         window.api.load(video, subtitlesSelection.index);
       } else {
         window.api.load(video);

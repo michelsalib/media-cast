@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+/** biome-ignore-all lint/suspicious/noExplicitAny: third-party type shim */
 
 declare module 'castv2-client' {
   import type { EventEmitter } from 'node:stream';
@@ -94,9 +94,7 @@ declare module 'castv2-client' {
     };
   }
 
-  export interface Callback<T> {
-    (error: Error, result: T): void;
-  }
+  export type Callback<T> = (error: Error, result: T) => void;
 
   export class Client {
     connect(host: string, callback: Callback<void>): void;

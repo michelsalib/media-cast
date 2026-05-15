@@ -1,6 +1,6 @@
 import { Close } from '@mui/icons-material';
 import { Box, Fab, Slider, Stack, Typography } from '@mui/material';
-import { Media, MediaStatus } from 'castv2-client';
+import type { Media, MediaStatus } from 'castv2-client';
 import format from 'format-duration';
 import { useEffect, useState } from 'react';
 import PlayPause from './PlayPauseSeek';
@@ -14,12 +14,14 @@ export default function Player({ onDisconnect }: Props): React.JSX.Element {
   const [media, setMedia] = useState<Media | undefined>(undefined);
 
   useEffect(() => {
-    window.api.onStatus((s) => {
-      setStatus(s);
-    });
-    setInterval(() => {
+    const unsubscribe = window.api.onStatus(setStatus);
+    const intervalId = setInterval(() => {
       window.api.status();
     }, 1000);
+    return () => {
+      unsubscribe();
+      clearInterval(intervalId);
+    };
   }, []);
 
   useEffect(() => {

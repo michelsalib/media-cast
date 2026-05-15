@@ -1,5 +1,5 @@
-import { Client, DefaultMediaReceiver, Media, MediaStatus } from 'castv2-client';
 import { promisify } from 'node:util';
+import { Client, DefaultMediaReceiver, type Media, type MediaStatus } from 'castv2-client';
 
 export class CastPlayer {
   private readonly client: Client = new Client();

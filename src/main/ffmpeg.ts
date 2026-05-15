@@ -62,7 +62,7 @@ export async function probe(videoPath: string): Promise<FFProbeData> {
   return JSON.parse(data.stdout);
 }
 
-export async function thumbail(videoPath: string, width = 800, height = 600): Promise<Buffer> {
+export async function thumbnail(videoPath: string, width = 800, height = 600): Promise<Buffer> {
   const data = await promisify(execFile)(
     'ffmpeg',
     [

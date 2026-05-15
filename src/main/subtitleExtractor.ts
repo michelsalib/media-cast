@@ -1,15 +1,15 @@
-import { readFile } from 'fs/promises';
-import { extractSubtitles as ffmpegExtractSubtitles, convertSubtitles } from './ffmpeg';
+import { readFile } from 'node:fs/promises';
+import { convertSubtitles, extractSubtitles as ffmpegExtractSubtitles } from './ffmpeg';
 
 export async function extractSubtitles(
   videoPath: string,
   subtitlesPathOrIndex?: string | number
 ): Promise<Buffer | undefined> {
-  if (subtitlesPathOrIndex == undefined) {
+  if (subtitlesPathOrIndex === undefined) {
     return undefined;
   }
 
-  if (typeof subtitlesPathOrIndex == 'number') {
+  if (typeof subtitlesPathOrIndex === 'number') {
     return ffmpegExtractSubtitles(videoPath, subtitlesPathOrIndex);
   }
 

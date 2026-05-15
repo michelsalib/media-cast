@@ -1,8 +1,8 @@
 import { electronAPI } from '@electron-toolkit/preload';
-import { MediaStatus } from 'castv2-client';
-import { contextBridge, ipcRenderer, webUtils } from 'electron';
-import { ChromecastDevice } from '../main/ChromecastDevicesScanner';
-import { FFProbeData } from '../main/ffmpeg';
+import type { MediaStatus } from 'castv2-client';
+import { contextBridge, type IpcRendererEvent, ipcRenderer, webUtils } from 'electron';
+import type { ChromecastDevice } from '../main/ChromecastDevicesScanner';
+import type { FFProbeData } from '../main/ffmpeg';
 
 export type MediaCastApi = typeof api;
 
@@ -32,13 +32,22 @@ const api = {
     ipcRenderer.send('pause');
   },
 
-  onStatus(callback: (status: MediaStatus) => void): void {
-    ipcRenderer.on('status', (_event, status) => callback(status));
+  onStatus(callback: (status: MediaStatus) => void): () => void {
+    const handler = (_event: IpcRendererEvent, status: MediaStatus): void => callback(status);
+    ipcRenderer.on('status', handler);
+    return () => {
+      ipcRenderer.off('status', handler);
+    };
   },
 
-  onScan(callback: (devices: ChromecastDevice[]) => void): void {
-    ipcRenderer.on('scan', (_event, status) => callback(status));
+  onScan(callback: (devices: ChromecastDevice[]) => void): () => void {
+    const handler = (_event: IpcRendererEvent, devices: ChromecastDevice[]): void =>
+      callback(devices);
+    ipcRenderer.on('scan', handler);
     ipcRenderer.send('scan');
+    return () => {
+      ipcRenderer.off('scan', handler);
+    };
   },
 
   probe(path: File): Promise<FFProbeData> {
@@ -58,19 +67,9 @@ const api = {
   },
 };
 
-// Use `contextBridge` APIs to expose Electron APIs to
-// renderer only if context isolation is enabled, otherwise
-// just add to the DOM global.
-if (process.contextIsolated) {
-  try {
-    contextBridge.exposeInMainWorld('electron', electronAPI);
-    contextBridge.exposeInMainWorld('api', api);
-  } catch (error) {
-    console.error(error);
-  }
-} else {
-  // @ts-ignore (define in dts)
-  window.electron = electronAPI;
-  // @ts-ignore (define in dts)
-  window.api = api;
+try {
+  contextBridge.exposeInMainWorld('electron', electronAPI);
+  contextBridge.exposeInMainWorld('api', api);
+} catch (error) {
+  console.error(error);
 }

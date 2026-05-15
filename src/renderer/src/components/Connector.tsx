@@ -14,9 +14,7 @@ export function Connector({ onChange }: Props): React.JSX.Element {
   const [connectedIp, setConnectedIp] = useState<string | null>(null);
 
   useEffect(() => {
-    window.api.onScan((devices) => {
-      setDevices(devices);
-    });
+    return window.api.onScan(setDevices);
   }, []);
 
   useEffect(() => {
@@ -24,7 +22,7 @@ export function Connector({ onChange }: Props): React.JSX.Element {
   }, [state, onChange]);
 
   async function connect(ip: string): Promise<void> {
-    if (state == 'LOADING') {
+    if (state === 'LOADING') {
       return;
     }
 
@@ -46,7 +44,7 @@ export function Connector({ onChange }: Props): React.JSX.Element {
           variant="outlined"
           key={d.ip}
           onClick={() => connect(d.ip)}
-          color={connectedIp == d.ip ? 'success' : 'inherit'}
+          color={connectedIp === d.ip ? 'success' : 'inherit'}
           sx={{ width: '200px' }}
         >
           <Stack
@@ -61,7 +59,7 @@ export function Connector({ onChange }: Props): React.JSX.Element {
             }}
           >
             <Typography noWrap>{d.name}</Typography>
-            {state == 'LOADING' && d.ip == connectedIp ? (
+            {state === 'LOADING' && d.ip === connectedIp ? (
               <CircularProgress
                 color="inherit"
                 size="1.5rem"

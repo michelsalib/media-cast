@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { createServer, IncomingMessage, Server, ServerResponse } from 'node:http';
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { networkInterfaces } from 'node:os';
 import { promisify } from 'node:util';
 import send from 'send';
@@ -16,7 +16,7 @@ export class MediaServer {
     this.server.listen(port);
     this.internalIp = Object.values(networkInterfaces())
       .flat()
-      .find((i) => i?.family == 'IPv4' && i.internal == false)?.address;
+      .find((i) => i?.family === 'IPv4' && i.internal === false)?.address;
   }
 
   private async handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -26,11 +26,11 @@ export class MediaServer {
       return;
     }
 
-    if (req.url == `/${this.sessionHash}/video`) {
+    if (req.url === `/${this.sessionHash}/video`) {
       send(req, this.currentVideoPath).pipe(res);
 
       return;
-    } else if (req.url == `/${this.sessionHash}/subs`) {
+    } else if (req.url === `/${this.sessionHash}/subs`) {
       if (!this.currentSubtitlesData) {
         res.writeHead(404);
         res.end('No subtitles data set');
