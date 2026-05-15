@@ -24,6 +24,9 @@ nsis:
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
 mac:
+  # evermeet.cx only ships x86_64 ffmpeg; the universal merger sees identical bytes
+  # in both arch slices and refuses to dedupe unless told the files are x64-only.
+  x64ArchFiles: Contents/Resources/bin/**
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
     - NSCameraUsageDescription: Application requests access to the device's camera.

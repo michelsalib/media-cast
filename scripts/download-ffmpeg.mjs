@@ -30,16 +30,28 @@ const arch = process.arch;
 const ext = platform === 'win32' ? '.exe' : '';
 
 const projectRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
-const targetDir = join(projectRoot, 'resources', 'bin', `${platform}-${arch}`);
-const ffmpegPath = join(targetDir, `ffmpeg${ext}`);
-const ffprobePath = join(targetDir, `ffprobe${ext}`);
 
-if (existsSync(ffmpegPath) && existsSync(ffprobePath)) {
-  console.log(`✓ Binaries already present: ${targetDir}`);
+// On darwin, fan out the same x86_64 binary (the only one evermeet ships) into BOTH
+// darwin-x64/ and darwin-arm64/. The universal app contains both arch slices, each
+// pointing at its matching resource path; arm64 Macs end up running ffmpeg under Rosetta.
+const targetDirs =
+  platform === 'darwin'
+    ? [
+        join(projectRoot, 'resources', 'bin', 'darwin-x64'),
+        join(projectRoot, 'resources', 'bin', 'darwin-arm64'),
+      ]
+    : [join(projectRoot, 'resources', 'bin', `${platform}-${arch}`)];
+
+if (
+  targetDirs.every(
+    (d) => existsSync(join(d, `ffmpeg${ext}`)) && existsSync(join(d, `ffprobe${ext}`))
+  )
+) {
+  console.log(`✓ Binaries already present in ${targetDirs.join(', ')}`);
   process.exit(0);
 }
 
-mkdirSync(targetDir, { recursive: true });
+for (const dir of targetDirs) mkdirSync(dir, { recursive: true });
 
 const tmp = join(tmpdir(), `ffmpeg-download-${process.pid}`);
 mkdirSync(tmp, { recursive: true });
@@ -91,6 +103,19 @@ function findFile(dir, name) {
   return null;
 }
 
+function install(srcFfmpeg, srcFfprobe) {
+  for (const dir of targetDirs) {
+    const ff = join(dir, `ffmpeg${ext}`);
+    const fp = join(dir, `ffprobe${ext}`);
+    copyFileSync(srcFfmpeg, ff);
+    copyFileSync(srcFfprobe, fp);
+    if (platform !== 'win32') {
+      chmodSync(ff, 0o755);
+      chmodSync(fp, 0o755);
+    }
+  }
+}
+
 try {
   if (platform === 'win32' && arch === 'x64') {
     const zip = join(tmp, 'ffmpeg.zip');
@@ -100,17 +125,18 @@ try {
     const ff = findFile(tmp, 'ffmpeg.exe');
     const fp = findFile(tmp, 'ffprobe.exe');
     if (!ff || !fp) throw new Error('Could not locate ffmpeg.exe / ffprobe.exe in archive');
-    copyFileSync(ff, ffmpegPath);
-    copyFileSync(fp, ffprobePath);
+    install(ff, fp);
   } else if (platform === 'darwin') {
     const ffZip = join(tmp, 'ffmpeg.zip');
     const fpZip = join(tmp, 'ffprobe.zip');
     await download('https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip', ffZip);
     await download('https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip', fpZip);
-    extract(ffZip, targetDir);
-    extract(fpZip, targetDir);
-    chmodSync(ffmpegPath, 0o755);
-    chmodSync(ffprobePath, 0o755);
+    extract(ffZip, tmp);
+    extract(fpZip, tmp);
+    const ff = findFile(tmp, 'ffmpeg');
+    const fp = findFile(tmp, 'ffprobe');
+    if (!ff || !fp) throw new Error('Could not locate ffmpeg / ffprobe in archive');
+    install(ff, fp);
   } else if (platform === 'linux' && arch === 'x64') {
     const archive = join(tmp, 'ffmpeg.tar.xz');
     await download(
@@ -121,15 +147,12 @@ try {
     const ff = findFile(tmp, 'ffmpeg');
     const fp = findFile(tmp, 'ffprobe');
     if (!ff || !fp) throw new Error('Could not locate ffmpeg / ffprobe in archive');
-    copyFileSync(ff, ffmpegPath);
-    copyFileSync(fp, ffprobePath);
-    chmodSync(ffmpegPath, 0o755);
-    chmodSync(ffprobePath, 0o755);
+    install(ff, fp);
   } else {
     console.warn(`No download source defined for ${platform}-${arch}; skipping.`);
     process.exit(0);
   }
-  console.log(`✓ ffmpeg + ffprobe installed in ${targetDir}`);
+  console.log(`✓ ffmpeg + ffprobe installed in ${targetDirs.join(', ')}`);
 } finally {
   await rm(tmp, { recursive: true, force: true });
 }
