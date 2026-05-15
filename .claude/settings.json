@@ -5,7 +5,8 @@
       "Bash(npx biome *)",
       "Bash(npm view *)",
       "Bash(\"node_modules/ffprobe-static/bin/win32/x64/ffprobe.exe\" -v quiet -print_format json -show_format -show_streams -i \"C:\\\\Users\\\\m.salib\\\\Downloads\\\\Mobile Devices\\\\Dhurandhar.The.Revenge.2026.1080p.WEBRip.x264.AAC5.1-[YTS.BZ].mp4\")",
-      "Bash(npm search *)"
+      "Bash(npm search *)",
+      "Bash(npx tsc *)"
     ]
   }
 }
