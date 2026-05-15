@@ -1,8 +1,8 @@
 import { Close } from '@mui/icons-material';
 import { Box, Fab, Slider, Stack, Typography } from '@mui/material';
-import type { Media, MediaStatus } from 'castv2-client';
 import format from 'format-duration';
 import { useEffect, useState } from 'react';
+import type { PlayerStatus } from '../../../shared/types';
 import PlayPause from './PlayPauseSeek';
 
 type Props = {
@@ -10,8 +10,7 @@ type Props = {
 };
 
 export default function Player({ onDisconnect }: Props): React.JSX.Element {
-  const [status, setStatus] = useState<MediaStatus | undefined>(undefined);
-  const [media, setMedia] = useState<Media | undefined>(undefined);
+  const [status, setStatus] = useState<PlayerStatus | undefined>(undefined);
 
   useEffect(() => {
     const unsubscribe = window.api.onStatus(setStatus);
@@ -23,12 +22,6 @@ export default function Player({ onDisconnect }: Props): React.JSX.Element {
       clearInterval(intervalId);
     };
   }, []);
-
-  useEffect(() => {
-    if (status?.media) {
-      setMedia(status.media);
-    }
-  }, [status]);
 
   function seek(_evt: Event, value: number): void {
     window.api.seek(value);
@@ -42,7 +35,7 @@ export default function Player({ onDisconnect }: Props): React.JSX.Element {
   return (
     <Box>
       <Fab onClick={disconnect} color="info" size="small" sx={{ float: 'right' }}>
-        <Close></Close>
+        <Close />
       </Fab>
       <Stack
         useFlexGap
@@ -53,18 +46,18 @@ export default function Player({ onDisconnect }: Props): React.JSX.Element {
         }}
       >
         <Typography variant="h3" noWrap sx={{ width: 1 }}>
-          {media?.metadata?.title || 'no media'}
+          {status?.title || 'no media'}
         </Typography>
-        <PlayPause status={status}></PlayPause>
+        <PlayPause status={status} />
         <Slider
           min={0}
-          max={media?.duration || 100}
+          max={status?.duration || 100}
           value={status?.currentTime || 0}
           onChange={seek}
-        ></Slider>
+        />
         <Stack direction="row" sx={{ width: '100%', justifyContent: 'space-between' }}>
           <div>{status?.currentTime ? format(status.currentTime * 1000) : 'NA'}</div>
-          <div>{media?.duration ? format(media.duration * 1000) : 'NA'}</div>
+          <div>{status?.duration ? format(status.duration * 1000) : 'NA'}</div>
         </Stack>
       </Stack>
     </Box>

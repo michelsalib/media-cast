@@ -5,12 +5,12 @@ import {
   PlayArrowRounded,
 } from '@mui/icons-material';
 import { Box, Button } from '@mui/material';
-import type { MediaStatus } from 'castv2-client';
 import { useEffect, useState } from 'react';
+import type { PlayerStatus } from '../../../shared/types';
 
 type BUTTON_STATE = 'PLAY' | 'PAUSE' | 'UNKNOWN';
 type Props = {
-  status?: MediaStatus;
+  status?: PlayerStatus;
 };
 
 export default function PlayPauseSeek({ status }: Props): React.JSX.Element {

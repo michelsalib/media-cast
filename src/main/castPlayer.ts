@@ -1,30 +1,23 @@
 import { promisify } from 'node:util';
 import { Client, DefaultMediaReceiver, type Media, type MediaStatus } from 'castv2-client';
+import type { LoadVideoOptions, PlayerState, PlayerStatus, Renderer } from '../shared/types';
 
-export class CastPlayer {
+export class CastPlayer implements Renderer {
   private readonly client: Client = new Client();
   private player?: DefaultMediaReceiver;
-  private statusCallback?: (status: MediaStatus) => void;
-  private _host?: string;
+  private statusCallback?: (status: PlayerStatus) => void;
+  private lastMedia?: Media;
 
-  get host(): string | undefined {
-    return this._host;
-  }
+  constructor(private readonly host: string) {}
 
-  onStatus(callback: (status: MediaStatus) => void): void {
+  onStatus(callback: (status: PlayerStatus) => void): void {
     this.statusCallback = callback;
   }
 
-  async connect(host: string): Promise<DefaultMediaReceiver> {
-    await promisify(this.client.connect).bind(this.client)(host);
-
-    this._host = host;
-
+  async connect(): Promise<void> {
+    await promisify(this.client.connect).bind(this.client)(this.host);
     this.player = await promisify(this.client.launch).bind(this.client)(DefaultMediaReceiver);
-
-    this.player.on('status', (s) => this.statusCallback?.(s));
-
-    return this.player;
+    this.player.on('status', (s) => this.emit(s));
   }
 
   async close(): Promise<void> {
@@ -32,16 +25,15 @@ export class CastPlayer {
     this.client.close();
   }
 
-  async loadVideo(title: string, videoUrl: string, subtitlesUrl?: string): Promise<MediaStatus> {
+  async loadVideo({ title, videoUrl, subtitlesUrl }: LoadVideoOptions): Promise<void> {
     if (!this.player) {
       throw new Error('Player not ready');
     }
 
     const media: Media = {
-      // Here you can plug an URL to any mp4, webm, mp3 or jpg file with the proper contentType.
       contentId: videoUrl,
       contentType: 'video/mp4',
-      streamType: 'BUFFERED', // or LIVE
+      streamType: 'BUFFERED',
       metadata: {
         type: 0,
         metadataType: 0,
@@ -50,7 +42,6 @@ export class CastPlayer {
     };
 
     if (subtitlesUrl) {
-      // Styling can be done like so
       // https://github.com/thibauts/node-castv2-client/wiki/How-to-use-subtitles-with-the-DefaultMediaReceiver-app#subtitle-styling
       media.textTrackStyle = {
         fontFamily: 'Droid Sans',
@@ -72,7 +63,7 @@ export class CastPlayer {
       ];
     }
 
-    return promisify(this.player.load).bind(this.player)(media, {
+    await promisify(this.player.load).bind(this.player)(media, {
       autoplay: true,
       activeTrackIds: subtitlesUrl ? [1] : [],
     });
@@ -82,7 +73,6 @@ export class CastPlayer {
     if (!this.player) {
       throw new Error('Player not ready');
     }
-
     return promisify(this.player.pause).bind(this.player)();
   }
 
@@ -90,7 +80,6 @@ export class CastPlayer {
     if (!this.player) {
       throw new Error('Player not ready');
     }
-
     return promisify(this.player.play).bind(this.player)();
   }
 
@@ -98,7 +87,6 @@ export class CastPlayer {
     if (!this.player) {
       throw new Error('Player not ready');
     }
-
     return promisify(this.player.seek).bind(this.player)(time);
   }
 
@@ -106,9 +94,20 @@ export class CastPlayer {
     if (!this.statusCallback || !this.player) {
       return;
     }
-
     const status = await promisify(this.player.getStatus).bind(this.player)();
+    this.emit(status);
+  }
 
-    this.statusCallback(status);
+  private emit(status: MediaStatus): void {
+    if (status.media) {
+      this.lastMedia = status.media;
+    }
+    const media = status.media ?? this.lastMedia;
+    this.statusCallback?.({
+      playerState: status.playerState as PlayerState,
+      currentTime: status.currentTime,
+      duration: media?.duration,
+      title: media?.metadata?.title,
+    });
   }
 }

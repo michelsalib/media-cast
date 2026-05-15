@@ -1,8 +1,7 @@
 import { electronAPI } from '@electron-toolkit/preload';
-import type { MediaStatus } from 'castv2-client';
 import { contextBridge, type IpcRendererEvent, ipcRenderer, webUtils } from 'electron';
-import type { ChromecastDevice } from '../main/ChromecastDevicesScanner';
 import type { FFProbeData } from '../main/ffmpeg';
+import type { Device, PlayerStatus } from '../shared/types';
 
 export type MediaCastApi = typeof api;
 
@@ -32,17 +31,16 @@ const api = {
     ipcRenderer.send('pause');
   },
 
-  onStatus(callback: (status: MediaStatus) => void): () => void {
-    const handler = (_event: IpcRendererEvent, status: MediaStatus): void => callback(status);
+  onStatus(callback: (status: PlayerStatus) => void): () => void {
+    const handler = (_event: IpcRendererEvent, status: PlayerStatus): void => callback(status);
     ipcRenderer.on('status', handler);
     return () => {
       ipcRenderer.off('status', handler);
     };
   },
 
-  onScan(callback: (devices: ChromecastDevice[]) => void): () => void {
-    const handler = (_event: IpcRendererEvent, devices: ChromecastDevice[]): void =>
-      callback(devices);
+  onScan(callback: (devices: Device[]) => void): () => void {
+    const handler = (_event: IpcRendererEvent, devices: Device[]): void => callback(devices);
     ipcRenderer.on('scan', handler);
     ipcRenderer.send('scan');
     return () => {
@@ -58,8 +56,8 @@ const api = {
     return ipcRenderer.invoke('thumbnail', webUtils.getPathForFile(path), width, height);
   },
 
-  connect(ip: string): Promise<void> {
-    return ipcRenderer.invoke('connect', ip);
+  connect(deviceId: string): Promise<void> {
+    return ipcRenderer.invoke('connect', deviceId);
   },
 
   disconnect(): Promise<void> {

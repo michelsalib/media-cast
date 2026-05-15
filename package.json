@@ -39,6 +39,9 @@
     "format-duration": "^3.0.2",
     "send": "^1.2.1"
   },
+  "overrides": {
+    "protobufjs": "^7.5.8"
+  },
   "devDependencies": {
     "@biomejs/biome": "^2.4.15",
     "@electron-toolkit/tsconfig": "^2.0.0",

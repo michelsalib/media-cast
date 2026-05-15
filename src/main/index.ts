@@ -2,16 +2,20 @@ import { basename, join } from 'node:path';
 import { electronApp, is, optimizer } from '@electron-toolkit/utils';
 import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import icon from '../../resources/icon.png?asset';
-import { ChromecastDevicesScanner } from './ChromecastDevicesScanner';
+import type { Device, Renderer } from '../shared/types';
+import { type ChromecastDevice, ChromecastDevicesScanner } from './ChromecastDevicesScanner';
 import { CastPlayer } from './castPlayer';
 import { probe, thumbnail } from './ffmpeg';
 import { MediaServer } from './MediaServer';
 import { extractSubtitles } from './subtitleExtractor';
+import { type UpnpDevice, UpnpDevicesScanner } from './UpnpDevicesScanner';
+import { UpnpPlayer } from './upnp/UpnpPlayer';
 
 const port = 4004;
 
+type KnownDevice = ChromecastDevice | UpnpDevice;
+
 function createWindow(): BrowserWindow {
-  // Create the browser window.
   const mainWindow = new BrowserWindow({
     width: 900,
     height: 670,
@@ -40,8 +44,6 @@ function createWindow(): BrowserWindow {
     return { action: 'deny' };
   });
 
-  // HMR for renderer base on electron-vite cli.
-  // Load the remote URL for development or the local html file for production.
   if (is.dev && process.env.ELECTRON_RENDERER_URL) {
     mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
   } else {
@@ -51,38 +53,59 @@ function createWindow(): BrowserWindow {
   return mainWindow;
 }
 
-// This method will be called when Electron has finished
-// initialization and is ready to create browser windows.
-// Some APIs can only be used after this event occurs.
 app.whenReady().then(() => {
-  // Set app user model id for windows
   electronApp.setAppUserModelId('com.electron');
 
-  // Default open or close DevTools by F12 in development
-  // and ignore CommandOrControl + R in production.
-  // see https://github.com/alex8088/electron-toolkit/tree/master/packages/utils
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window);
   });
 
   app.on('activate', () => {
-    // On macOS it's common to re-create a window in the app when the
-    // dock icon is clicked and there are no other windows open.
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 
-  let chromecast: CastPlayer | undefined;
+  let renderer: Renderer | undefined;
+  let currentDeviceId: string | undefined;
 
   const mainWindow = createWindow();
   const chromecastScanner = new ChromecastDevicesScanner();
+  const upnpScanner = new UpnpDevicesScanner();
   const server = new MediaServer(port);
 
-  chromecastScanner.onDevices((devices) => {
-    mainWindow.webContents.send('scan', devices);
-  });
-  ipcMain.on('scan', () => chromecastScanner.refresh());
+  const knownDevices = new Map<string, KnownDevice>();
 
-  ipcMain.on('status', () => chromecast?.getStatus());
+  function broadcastDevices(): void {
+    const devices: Device[] = [...knownDevices.values()].map((d) => ({
+      id: d.id,
+      type: d.type,
+      name: d.name,
+      ip: d.ip,
+    }));
+    mainWindow.webContents.send('scan', devices);
+  }
+
+  chromecastScanner.onDevices((devices) => {
+    for (const [id, d] of knownDevices) {
+      if (d.type === 'chromecast') knownDevices.delete(id);
+    }
+    for (const d of devices) knownDevices.set(d.id, d);
+    broadcastDevices();
+  });
+
+  upnpScanner.onDevices((devices) => {
+    for (const [id, d] of knownDevices) {
+      if (d.type === 'upnp') knownDevices.delete(id);
+    }
+    for (const d of devices) knownDevices.set(d.id, d);
+    broadcastDevices();
+  });
+
+  ipcMain.on('scan', () => {
+    chromecastScanner.refresh();
+    upnpScanner.refresh();
+  });
+
+  ipcMain.on('status', () => renderer?.getStatus());
 
   ipcMain.handle('probe', (_event, path: string) => probe(path));
 
@@ -90,58 +113,94 @@ app.whenReady().then(() => {
     thumbnail(path, width, height)
   );
 
-  ipcMain.handle('connect', async (_event, ip) => {
-    if (ip === chromecast?.host) {
+  ipcMain.handle('connect', async (_event, deviceId: string) => {
+    if (deviceId === currentDeviceId) {
       return;
     }
 
-    await chromecast?.close();
+    const device = knownDevices.get(deviceId);
+    if (!device) {
+      throw new Error(`Unknown device: ${deviceId}`);
+    }
 
-    chromecast = new CastPlayer();
+    await renderer?.close();
 
-    chromecast.onStatus((s) => mainWindow.webContents.send('status', s));
+    if (device.type === 'chromecast') {
+      renderer = new CastPlayer(device.ip);
+    } else {
+      renderer = new UpnpPlayer({
+        avTransportControlUrl: device.avTransportControlUrl,
+        avTransportEventSubUrl: device.avTransportEventSubUrl,
+        targetIp: device.ip,
+      });
+    }
 
-    await chromecast.connect(ip);
+    renderer.onStatus((s) => mainWindow.webContents.send('status', s));
+    await renderer.connect();
+    currentDeviceId = deviceId;
   });
 
   ipcMain.handle('disconnect', async () => {
-    chromecast?.close();
-    chromecast = undefined;
+    await renderer?.close();
+    renderer = undefined;
+    currentDeviceId = undefined;
   });
 
   ipcMain.on('load', async (_evt, videoPath, subtitlesPathOrIndex) => {
-    if (!chromecast) {
+    if (!renderer) {
+      return;
+    }
+    const device = knownDevices.get(currentDeviceId ?? '');
+    if (!device?.ip) {
+      console.error('load failed: no current device');
       return;
     }
 
-    const subtitlesData = await extractSubtitles(videoPath, subtitlesPathOrIndex);
+    try {
+      const [subtitlesData, probeData] = await Promise.all([
+        extractSubtitles(videoPath, subtitlesPathOrIndex),
+        probe(videoPath),
+      ]);
 
-    const videoUrl = server.serveVideo(videoPath);
-    const subtitlesUrl = subtitlesData ? server.serveSubtitles(subtitlesData) : undefined;
+      const duration = Number(probeData.format.duration);
+      const targetIp = device.ip;
+      const transcode = device.type === 'upnp';
+      const videoUrl = server.serveVideo(videoPath, {
+        transcode,
+        targetIp,
+        duration: Number.isFinite(duration) ? duration : undefined,
+      });
+      const subtitlesUrl = subtitlesData
+        ? server.serveSubtitles(subtitlesData, { targetIp })
+        : undefined;
 
-    chromecast.loadVideo(basename(videoPath), videoUrl, subtitlesUrl);
+      await renderer.loadVideo({
+        title: basename(videoPath),
+        videoUrl,
+        subtitlesUrl,
+        duration: Number.isFinite(duration) ? duration : undefined,
+      });
+    } catch (err) {
+      console.error('load failed:', err);
+    }
   });
 
-  ipcMain.on('seek', (_evt, time) => chromecast?.seek(time));
+  ipcMain.on('seek', (_evt, time) => renderer?.seek(time));
 
-  ipcMain.on('pause', () => chromecast?.pause());
+  ipcMain.on('pause', () => renderer?.pause());
 
-  ipcMain.on('play', () => chromecast?.play());
+  ipcMain.on('play', () => renderer?.play());
 
   mainWindow.on('closed', async () => {
-    chromecast?.close();
+    await renderer?.close();
+    chromecastScanner.close();
+    upnpScanner.close();
     await server.close();
   });
 });
 
-// Quit when all windows are closed, except on macOS. There, it's common
-// for applications and their menu bar to stay active until the user quits
-// explicitly with Cmd + Q.
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
   }
 });
-
-// In this file you can include the rest of your app's specific main process
-// code. You can also put them in separate files and require them here.

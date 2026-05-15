@@ -1,7 +1,8 @@
 import { Bonjour, type Browser, type Service } from 'bonjour-service';
+import type { Device } from '../shared/types';
 
-export interface ChromecastDevice {
-  name: string;
+export interface ChromecastDevice extends Device {
+  type: 'chromecast';
   ip: string;
 }
 
@@ -22,7 +23,12 @@ export class ChromecastDevicesScanner {
     if (!ip) {
       return;
     }
-    this.devices.set(ip, { ip, name: service.txt?.fn ?? service.name });
+    this.devices.set(ip, {
+      id: `chromecast:${ip}`,
+      type: 'chromecast',
+      name: service.txt?.fn ?? service.name,
+      ip,
+    });
     this.emit();
   }
 
