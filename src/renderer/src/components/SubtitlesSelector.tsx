@@ -1,12 +1,23 @@
 import { MenuItem, Select } from '@mui/material';
 import { useEffect, useState } from 'react';
-import { NO_SUBTITLES, SubtitlesSelection } from './SubtitlesSelection';
+import { NO_SUBTITLES, type SubtitlesSelection } from './SubtitlesSelection';
 
 type Props = {
   videoFile?: File;
   subFile?: File;
   onChange?: (selection: SubtitlesSelection) => void;
 };
+
+function choiceKey(c: SubtitlesSelection): string {
+  switch (c.type) {
+    case 'external':
+      return `ext:${c.file.name}`;
+    case 'internal':
+      return `int:${c.index}`;
+    default:
+      return 'none';
+  }
+}
 
 export default function SubtitlesSelector({
   onChange,
@@ -17,50 +28,48 @@ export default function SubtitlesSelector({
   const [choice, setChoice] = useState(NO_SUBTITLES);
 
   useEffect(() => {
-    const newChoices: SubtitlesSelection[] = choices.filter((c) => c.type != 'external');
+    let cancelled = false;
 
-    if (subFile) {
-      const newChoice: SubtitlesSelection = {
-        type: 'external',
-        name: subFile.name,
-        file: subFile,
-      };
-      newChoices.push(newChoice);
-      setChoice(newChoice);
-    } else if (choice.type == 'external') {
-      setChoice(NO_SUBTITLES);
-    }
-
-    setChoices(newChoices);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [subFile]);
-
-  useEffect(() => {
     async function compute(): Promise<void> {
-      const newChoices: SubtitlesSelection[] = choices.filter((c) => c.type != 'internal');
+      const newChoices: SubtitlesSelection[] = [NO_SUBTITLES];
 
       if (videoFile) {
         const probeData = await window.api.probe(videoFile);
-        const newChoicesItems = probeData.streams
-          .filter((s) => s.codec_type == 'subtitle')
-          .map((s, i): SubtitlesSelection => {
-            return {
+        const internal = probeData.streams
+          .filter((s) => s.codec_type === 'subtitle')
+          .map(
+            (s, i): SubtitlesSelection => ({
               type: 'internal',
               index: i,
               name: s.tags.title || s.tags.language || 'Unknown video subtitles',
-            };
-          });
-        newChoices.push(...newChoicesItems);
-        setChoice(newChoicesItems.length ? newChoicesItems[0] : NO_SUBTITLES);
-      } else if (choice.type == 'internal') {
-        setChoice(NO_SUBTITLES);
+            })
+          );
+        newChoices.push(...internal);
       }
 
+      if (subFile) {
+        newChoices.push({ type: 'external', name: subFile.name, file: subFile });
+      }
+
+      if (cancelled) {
+        return;
+      }
+
+      const autoSelect =
+        newChoices.find((c) => c.type === 'external') ??
+        newChoices.find((c) => c.type === 'internal') ??
+        NO_SUBTITLES;
+
       setChoices(newChoices);
+      setChoice(autoSelect);
     }
+
     compute();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [videoFile]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [videoFile, subFile]);
 
   useEffect(() => {
     onChange?.(choice);
@@ -76,7 +85,7 @@ export default function SubtitlesSelector({
       }}
     >
       {choices.map((c, i) => (
-        <MenuItem key={i} value={i}>
+        <MenuItem key={choiceKey(c)} value={i}>
           {c.name}
         </MenuItem>
       ))}

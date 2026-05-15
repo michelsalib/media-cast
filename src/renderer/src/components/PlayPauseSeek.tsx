@@ -1,18 +1,16 @@
 import {
   FastForwardRounded,
   FastRewindRounded,
-  Pause,
   PauseRounded,
-  PlayArrow,
   PlayArrowRounded,
 } from '@mui/icons-material';
-import { Box, Button, IconButton } from '@mui/material';
-import { MediaStatus } from 'castv2-client';
+import { Box, Button } from '@mui/material';
 import { useEffect, useState } from 'react';
+import type { PlayerStatus } from '../../../shared/types';
 
 type BUTTON_STATE = 'PLAY' | 'PAUSE' | 'UNKNOWN';
 type Props = {
-  status?: MediaStatus;
+  status?: PlayerStatus;
 };
 
 export default function PlayPauseSeek({ status }: Props): React.JSX.Element {
@@ -23,12 +21,9 @@ export default function PlayPauseSeek({ status }: Props): React.JSX.Element {
       case 'PLAYING':
         setState('PLAY');
         return;
-        return;
       case 'PAUSED':
         setState('PAUSE');
         return;
-      case 'BUFFERING':
-      case 'IDLE':
       default:
         setState('UNKNOWN');
     }
@@ -60,43 +55,21 @@ export default function PlayPauseSeek({ status }: Props): React.JSX.Element {
 
   return (
     <Box>
-      <Button onClick={seekRewind} disabled={state == 'UNKNOWN'}>
+      <Button onClick={seekRewind} disabled={state === 'UNKNOWN'}>
         <FastRewindRounded fontSize="large" />
       </Button>
-      {state == 'PLAY' ? (
+      {state === 'PLAY' ? (
         <Button onClick={pause}>
           <PauseRounded sx={{ fontSize: '3rem' }} />
         </Button>
       ) : (
-        <Button onClick={play} disabled={state == 'UNKNOWN'}>
+        <Button onClick={play} disabled={state === 'UNKNOWN'}>
           <PlayArrowRounded sx={{ fontSize: '3rem' }} />
         </Button>
       )}
-      <Button onClick={seekForward} disabled={state == 'UNKNOWN'}>
+      <Button onClick={seekForward} disabled={state === 'UNKNOWN'}>
         <FastForwardRounded fontSize="large" />
       </Button>
     </Box>
-  );
-
-  if (state == 'UNKNOWN') {
-    return (
-      <Button>
-        <PlayArrow />
-      </Button>
-    );
-  }
-
-  if (state == 'PLAY') {
-    return (
-      <IconButton onClick={pause}>
-        <Pause />
-      </IconButton>
-    );
-  }
-
-  return (
-    <IconButton onClick={play}>
-      <PlayArrow />
-    </IconButton>
   );
 }
