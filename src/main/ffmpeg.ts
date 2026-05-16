@@ -107,7 +107,7 @@ export async function probe(videoPath: string): Promise<FFProbeData> {
 
 export async function thumbnail(videoPath: string, width = 800, height = 600): Promise<Buffer> {
   const data = await promisify(execFile)(
-    'ffmpeg',
+    ffmpegPath,
     [
       '-i',
       videoPath,
