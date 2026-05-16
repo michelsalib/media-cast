@@ -2,7 +2,7 @@ import { basename, join } from 'node:path';
 import { electronApp, is, optimizer } from '@electron-toolkit/utils';
 import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import { autoUpdater } from 'electron-updater';
-import icon from '../../resources/icon.png?asset';
+import icon from '../../build/icon.png?asset';
 import type { Device, DevicesScanner, Renderer } from '../shared/types';
 import { type ChromecastDevice, ChromecastDevicesScanner } from './chromecast/DevicesScanner';
 import { CastPlayer } from './chromecast/Player';
@@ -29,7 +29,7 @@ function createWindow(): BrowserWindow {
     autoHideMenuBar: true,
     titleBarStyle: 'hidden',
     ...(process.platform !== 'darwin' ? { titleBarOverlay: true } : {}),
-    ...(process.platform === 'linux' ? { icon } : {}),
+    icon,
     titleBarOverlay: {
       color: '#181818',
       symbolColor: '#ffffff',

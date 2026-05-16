@@ -20,6 +20,7 @@
     "typecheck:web": "tsgo --noEmit -p tsconfig.web.json",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "prepare:binaries": "node scripts/download-ffmpeg.mjs",
+    "prepare:icons": "node scripts/build-icons.mjs",
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
     "build": "npm run typecheck && electron-vite build",
@@ -59,8 +60,10 @@
     "electron": "^42.1.0",
     "electron-builder": "^26.8.1",
     "electron-vite": "^5.0.0",
+    "icon-gen": "^5.0.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
+    "sharp": "^0.34.5",
     "typescript": "^6.0.3",
     "vite": "^7.3.3"
   }

@@ -1,5 +1,5 @@
 appId: com.electron.app
-productName: media-cast
+productName: Media Cast
 directories:
   buildResources: build
 files:
