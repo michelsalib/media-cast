@@ -1,7 +1,7 @@
-import type { Device } from '../shared/types';
-import { fetchDescription } from './upnp/description';
-import { supportsVideoSink } from './upnp/protocolInfo';
-import { SsdpScanner } from './upnp/ssdp';
+import type { Device, DevicesScanner } from '../../shared/types';
+import { fetchDescription } from './description';
+import { supportsVideoSink } from './protocolInfo';
+import { SsdpScanner } from './ssdp';
 
 export interface UpnpDevice extends Device {
   type: 'upnp';
@@ -20,7 +20,8 @@ const EVICTION_INTERVAL_MS = 15_000;
 // We search every 10s, so 30s means a device is gone after ~3 missed responses.
 const MAX_TTL_MS = 30_000;
 
-export class UpnpDevicesScanner {
+export class UpnpDevicesScanner implements DevicesScanner<UpnpDevice> {
+  readonly type = 'upnp';
   private readonly ssdp = new SsdpScanner();
   private readonly devices = new Map<string, DeviceRecord>();
   private readonly rejectedIds = new Set<string>();

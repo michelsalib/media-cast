@@ -34,15 +34,15 @@ Shared types are in [src/shared/types.ts](src/shared/types.ts). The `Renderer` i
 
 Main holds at most one active `Renderer`. On `connect` it `.close()`s any prior one then instantiates the new one and wires `onStatus` → `status` IPC channel.
 
-- **[CastPlayer](src/main/castPlayer.ts)** (`castv2-client`) — direct stream + sidecar WebVTT subs.
-- **[UpnpPlayer](src/main/upnp/UpnpPlayer.ts)** — hand-rolled DLNA: SOAP control + GENA event subscription. Transport plumbing in `src/main/upnp/` (`soap.ts`, `eventing.ts`, `ssdp.ts`, `description.ts`, `xml.ts`). On `close`, `Stop` alone leaves the URI loaded on most renderers — also `SetAVTransportURI` with empty `CurrentURI` to unload.
+- **[CastPlayer](src/main/chromecast/Player.ts)** (`castv2-client`) — direct stream + sidecar WebVTT subs.
+- **[UpnpPlayer](src/main/upnp/Player.ts)** — hand-rolled DLNA: SOAP control + GENA event subscription. Transport plumbing in `src/main/upnp/` (`soap.ts`, `eventing.ts`, `ssdp.ts`, `description.ts`, `xml.ts`). On `close`, `Stop` alone leaves the URI loaded on most renderers — also `SetAVTransportURI` with empty `CurrentURI` to unload.
 
 ### Discovery
 
 Two scanners merge into one `knownDevices` map in `index.ts`:
 
-- [ChromecastDevicesScanner](src/main/ChromecastDevicesScanner.ts) — mDNS `_googlecast._tcp` via `bonjour-service`.
-- [UpnpDevicesScanner](src/main/UpnpDevicesScanner.ts) — SSDP M-SEARCH every 10s, evict past cache-control TTL.
+- [ChromecastDevicesScanner](src/main/chromecast/DevicesScanner.ts) — mDNS `_googlecast._tcp` via `bonjour-service`.
+- [UpnpDevicesScanner](src/main/upnp/DevicesScanner.ts) — SSDP M-SEARCH every 10s, evict past cache-control TTL.
 
 ### [MediaServer](src/main/MediaServer.ts)
 

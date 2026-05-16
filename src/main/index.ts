@@ -3,14 +3,14 @@ import { electronApp, is, optimizer } from '@electron-toolkit/utils';
 import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import icon from '../../resources/icon.png?asset';
-import type { Device, Renderer } from '../shared/types';
-import { type ChromecastDevice, ChromecastDevicesScanner } from './ChromecastDevicesScanner';
-import { CastPlayer } from './castPlayer';
+import type { Device, DevicesScanner, Renderer } from '../shared/types';
+import { type ChromecastDevice, ChromecastDevicesScanner } from './chromecast/DevicesScanner';
+import { CastPlayer } from './chromecast/Player';
 import { getFfmpegInfo, probe, thumbnail } from './ffmpeg';
 import { MediaServer } from './MediaServer';
 import { extractSubtitles } from './subtitleExtractor';
-import { type UpnpDevice, UpnpDevicesScanner } from './UpnpDevicesScanner';
-import { UpnpPlayer } from './upnp/UpnpPlayer';
+import { type UpnpDevice, UpnpDevicesScanner } from './upnp/DevicesScanner';
+import { UpnpPlayer } from './upnp/Player';
 
 const port = 4004;
 
@@ -100,25 +100,22 @@ app.whenReady().then(() => {
     mainWindow.webContents.send('scan', devices);
   }
 
-  chromecastScanner.onDevices((devices) => {
-    for (const [id, d] of knownDevices) {
-      if (d.type === 'chromecast') knownDevices.delete(id);
-    }
-    for (const d of devices) knownDevices.set(d.id, d);
-    broadcastDevices();
-  });
+  function wireScanner<D extends KnownDevice>(scanner: DevicesScanner<D>): void {
+    scanner.onDevices((devices) => {
+      for (const [id, d] of knownDevices) {
+        if (d.type === scanner.type) knownDevices.delete(id);
+      }
+      for (const d of devices) knownDevices.set(d.id, d);
+      broadcastDevices();
+    });
+  }
+  wireScanner(chromecastScanner);
+  wireScanner(upnpScanner);
 
-  upnpScanner.onDevices((devices) => {
-    for (const [id, d] of knownDevices) {
-      if (d.type === 'upnp') knownDevices.delete(id);
-    }
-    for (const d of devices) knownDevices.set(d.id, d);
-    broadcastDevices();
-  });
+  const scanners: DevicesScanner[] = [chromecastScanner, upnpScanner];
 
   ipcMain.on('scan', () => {
-    chromecastScanner.refresh();
-    upnpScanner.refresh();
+    for (const s of scanners) s.refresh();
   });
 
   ipcMain.on('status', () => renderer?.getStatus());
@@ -237,8 +234,7 @@ app.whenReady().then(() => {
 
   mainWindow.on('closed', async () => {
     await renderer?.close();
-    chromecastScanner.close();
-    upnpScanner.close();
+    for (const s of scanners) s.close();
     await server.close();
   });
 });

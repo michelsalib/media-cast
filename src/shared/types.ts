@@ -16,6 +16,13 @@ export interface Device {
   ip?: string;
 }
 
+export interface DevicesScanner<D extends Device = Device> {
+  readonly type: DeviceType;
+  onDevices(callback: (devices: D[]) => void): void;
+  refresh(): void;
+  close(): void;
+}
+
 export interface FfmpegInfo {
   ffmpegPath: string;
   ffprobePath: string;

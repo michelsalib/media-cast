@@ -21,6 +21,11 @@ function resolveBundledBinary(name: 'ffmpeg' | 'ffprobe'): string | undefined {
 const ffmpegPath = resolveBundledBinary('ffmpeg') ?? 'ffmpeg';
 const ffprobePath = resolveBundledBinary('ffprobe') ?? 'ffprobe';
 
+async function runFfmpeg(args: string[]): Promise<Buffer> {
+  const { stdout } = await promisify(execFile)(ffmpegPath, args, { encoding: 'buffer' });
+  return stdout;
+}
+
 export interface FFProbeData {
   streams: {
     index: number;
@@ -52,35 +57,19 @@ function muxerFor(format: SubtitleFormat): string {
   return format === 'vtt' ? 'webvtt' : 'srt';
 }
 
-export async function extractSubtitles(
+export function extractSubtitles(
   videoPath: string,
   track: number,
   format: SubtitleFormat = 'vtt'
 ): Promise<Buffer> {
-  const { stdout } = await promisify(execFile)(
-    ffmpegPath,
-    ['-i', videoPath, '-map', `0:s:${track}`, '-f', muxerFor(format), 'pipe:1'],
-    {
-      encoding: 'buffer',
-    }
-  );
-
-  return stdout;
+  return runFfmpeg(['-i', videoPath, '-map', `0:s:${track}`, '-f', muxerFor(format), 'pipe:1']);
 }
 
-export async function convertSubtitles(
+export function convertSubtitles(
   subtitlepath: string,
   format: SubtitleFormat = 'vtt'
 ): Promise<Buffer> {
-  const { stdout } = await promisify(execFile)(
-    ffmpegPath,
-    ['-i', subtitlepath, '-f', muxerFor(format), 'pipe:1'],
-    {
-      encoding: 'buffer',
-    }
-  );
-
-  return stdout;
+  return runFfmpeg(['-i', subtitlepath, '-f', muxerFor(format), 'pipe:1']);
 }
 
 export async function getFfmpegInfo(): Promise<FfmpegInfo> {
@@ -105,28 +94,20 @@ export async function probe(videoPath: string): Promise<FFProbeData> {
   return JSON.parse(data.stdout);
 }
 
-export async function thumbnail(videoPath: string, width = 800, height = 600): Promise<Buffer> {
-  const data = await promisify(execFile)(
-    ffmpegPath,
-    [
-      '-i',
-      videoPath,
-      '-ss',
-      '00:01:00',
-      '-frames:v',
-      '1',
-      '-f',
-      'image2',
-      '-s',
-      `${width}x${height}`,
-      'pipe:1',
-    ],
-    {
-      encoding: 'buffer',
-    }
-  );
-
-  return data.stdout;
+export function thumbnail(videoPath: string, width = 800, height = 600): Promise<Buffer> {
+  return runFfmpeg([
+    '-i',
+    videoPath,
+    '-ss',
+    '00:01:00',
+    '-frames:v',
+    '1',
+    '-f',
+    'image2',
+    '-s',
+    `${width}x${height}`,
+    'pipe:1',
+  ]);
 }
 
 export type BurnSubtitles =

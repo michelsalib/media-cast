@@ -1,12 +1,13 @@
 import { Bonjour, type Browser, type Service } from 'bonjour-service';
-import type { Device } from '../shared/types';
+import type { Device, DevicesScanner } from '../../shared/types';
 
 export interface ChromecastDevice extends Device {
   type: 'chromecast';
   ip: string;
 }
 
-export class ChromecastDevicesScanner {
+export class ChromecastDevicesScanner implements DevicesScanner<ChromecastDevice> {
+  readonly type = 'chromecast';
   private readonly bonjour = new Bonjour();
   private readonly browser: Browser;
   private readonly devices = new Map<string, ChromecastDevice>();
