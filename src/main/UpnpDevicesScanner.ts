@@ -1,5 +1,6 @@
 import type { Device } from '../shared/types';
 import { fetchDescription } from './upnp/description';
+import { supportsVideoSink } from './upnp/protocolInfo';
 import { SsdpScanner } from './upnp/ssdp';
 
 export interface UpnpDevice extends Device {
@@ -15,10 +16,14 @@ interface DeviceRecord extends UpnpDevice {
 
 const SEARCH_INTERVAL_MS = 10_000;
 const EVICTION_INTERVAL_MS = 15_000;
+// Cap device TTL: most renderers advertise 1800s, leaving shut-down devices in the list for 30min.
+// We search every 10s, so 30s means a device is gone after ~3 missed responses.
+const MAX_TTL_MS = 30_000;
 
 export class UpnpDevicesScanner {
   private readonly ssdp = new SsdpScanner();
   private readonly devices = new Map<string, DeviceRecord>();
+  private readonly rejectedIds = new Set<string>();
   private callback?: (devices: UpnpDevice[]) => void;
   private readonly searchTimer: NodeJS.Timeout;
   private readonly evictionTimer: NodeJS.Timeout;
@@ -38,7 +43,14 @@ export class UpnpDevicesScanner {
       return;
     }
     const id = `upnp:${desc.udn}`;
+    if (this.rejectedIds.has(id)) {
+      return;
+    }
     const previous = this.devices.get(id);
+    if (!previous && !(await supportsVideoSink(desc.connectionManagerControlUrl).catch(() => false))) {
+      this.rejectedIds.add(id);
+      return;
+    }
     const record: DeviceRecord = {
       id,
       type: 'upnp',
@@ -46,7 +58,7 @@ export class UpnpDevicesScanner {
       ip: new URL(location).hostname,
       avTransportControlUrl: desc.avTransportControlUrl,
       avTransportEventSubUrl: desc.avTransportEventSubUrl,
-      expiresAt: Date.now() + cacheMaxAge * 1000,
+      expiresAt: Date.now() + Math.min(cacheMaxAge * 1000, MAX_TTL_MS),
     };
     this.devices.set(id, record);
     if (!previous || previous.name !== record.name) {

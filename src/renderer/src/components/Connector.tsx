@@ -1,10 +1,11 @@
-import { Cast, CheckCircle, Tv } from '@mui/icons-material';
+import { Cast, CheckCircle, Refresh, Tv } from '@mui/icons-material';
 import {
   Box,
   Card,
   CardActionArea,
   Chip,
   CircularProgress,
+  IconButton,
   Stack,
   Typography,
   alpha,
@@ -31,11 +32,22 @@ const float = keyframes`
   50%      { transform: translateY(-2px); }
 `;
 
+const spin = keyframes`
+  to { transform: rotate(360deg); }
+`;
+
 export function Connector({ onChange }: Props): React.JSX.Element {
   const [devices, setDevices] = useState<Device[]>([]);
   const [state, setState] = useState<ConnectorState>('DISCONNECTED');
   const [connectedId, setConnectedId] = useState<string | null>(null);
+  const [scanning, setScanning] = useState(false);
   const theme = useTheme();
+
+  function refresh(): void {
+    window.api.refresh();
+    setScanning(true);
+    setTimeout(() => setScanning(false), 800);
+  }
 
   useEffect(() => {
     return window.api.onScan(setDevices);
@@ -91,6 +103,18 @@ export function Connector({ onChange }: Props): React.JSX.Element {
             ? `${devices.length} device${devices.length > 1 ? 's' : ''} available`
             : 'Scanning for devices…'}
         </Typography>
+        <IconButton
+          size="small"
+          onClick={refresh}
+          disabled={scanning}
+          aria-label="Rescan for devices"
+          sx={{ color: 'text.secondary', ml: 0.5 }}
+        >
+          <Refresh
+            fontSize="small"
+            sx={{ animation: scanning ? `${spin} 800ms linear` : 'none' }}
+          />
+        </IconButton>
       </Stack>
 
       <Stack direction="row" spacing={2} useFlexGap sx={{ flexWrap: 'wrap' }}>

@@ -48,6 +48,10 @@ const api = {
     };
   },
 
+  refresh(): void {
+    ipcRenderer.send('scan');
+  },
+
   probe(path: File): Promise<FFProbeData> {
     return ipcRenderer.invoke('probe', webUtils.getPathForFile(path));
   },

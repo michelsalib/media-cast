@@ -1,12 +1,13 @@
 import http from 'node:http';
 import { escapeXml } from './xml';
 
-const SERVICE_TYPE = 'urn:schemas-upnp-org:service:AVTransport:1';
+const AV_TRANSPORT = 'urn:schemas-upnp-org:service:AVTransport:1';
 
 export async function soapCall(
   controlUrl: string,
   action: string,
-  args: Record<string, string>
+  args: Record<string, string>,
+  serviceType: string = AV_TRANSPORT
 ): Promise<string> {
   const argXml = Object.entries(args)
     .map(([k, v]) => `<${k}>${escapeXml(v)}</${k}>`)
@@ -16,7 +17,7 @@ export async function soapCall(
     `<?xml version="1.0" encoding="utf-8"?>` +
     `<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">` +
     `<s:Body>` +
-    `<u:${action} xmlns:u="${SERVICE_TYPE}">${argXml}</u:${action}>` +
+    `<u:${action} xmlns:u="${serviceType}">${argXml}</u:${action}>` +
     `</s:Body>` +
     `</s:Envelope>`;
 
@@ -33,7 +34,7 @@ export async function soapCall(
         headers: {
           'Content-Type': 'text/xml; charset="utf-8"',
           'Content-Length': Buffer.byteLength(body),
-          SOAPACTION: `"${SERVICE_TYPE}#${action}"`,
+          SOAPACTION: `"${serviceType}#${action}"`,
         },
       },
       (res) => {

@@ -6,6 +6,7 @@ export interface DeviceDescription {
   udn: string;
   avTransportControlUrl: string;
   avTransportEventSubUrl: string;
+  connectionManagerControlUrl: string;
 }
 
 export async function fetchDescription(url: string): Promise<DeviceDescription | undefined> {
@@ -51,12 +52,19 @@ function parseDescription(xml: string, descriptionUrl: string): DeviceDescriptio
     return undefined;
   }
 
+  const cmService = findService(xml, 'urn:schemas-upnp-org:service:ConnectionManager:1');
+  const cmControlUrl = cmService && extractTag(cmService, 'controlURL');
+  if (!cmControlUrl) {
+    return undefined;
+  }
+
   const base = new URL(descriptionUrl);
   return {
     friendlyName: friendlyName.trim(),
     udn: udn.trim(),
     avTransportControlUrl: new URL(controlUrl.trim(), base).toString(),
     avTransportEventSubUrl: new URL(eventSubUrl.trim(), base).toString(),
+    connectionManagerControlUrl: new URL(cmControlUrl.trim(), base).toString(),
   };
 }
 
