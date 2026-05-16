@@ -16,6 +16,11 @@ const port = 4004;
 
 type KnownDevice = ChromecastDevice | UpnpDevice;
 
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+  process.exit(0);
+}
+
 function createWindow(): BrowserWindow {
   const mainWindow = new BrowserWindow({
     width: 900,
@@ -73,6 +78,12 @@ app.whenReady().then(() => {
   let currentDeviceId: string | undefined;
 
   const mainWindow = createWindow();
+
+  app.on('second-instance', () => {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  });
+
   const chromecastScanner = new ChromecastDevicesScanner();
   const upnpScanner = new UpnpDevicesScanner();
   const server = new MediaServer(port);
