@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <radialGradient id="purpleGlow" cx="80" cy="80" r="1100" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#7c4dff" stop-opacity="0.75"/>
+      <stop offset="100%" stop-color="#7c4dff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="cyanGlow" cx="944" cy="944" r="600" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#22d3ee" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#22d3ee" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect x="80" y="80" width="864" height="864" rx="220" ry="220" fill="#0e0b1a"/>
+  <rect x="80" y="80" width="864" height="864" rx="220" ry="220" fill="url(#purpleGlow)"/>
+  <rect x="80" y="80" width="864" height="864" rx="220" ry="220" fill="url(#cyanGlow)"/>
+
+  <rect x="85" y="85" width="854" height="854" rx="215" ry="215"
+        fill="none" stroke="#f1f5f9" stroke-width="8" stroke-opacity="0.45"/>
+
+  <g stroke="#f1f5f9" fill="none" stroke-width="60" stroke-linecap="round">
+    <path d="M 360 800 A 120 120 0 0 0 240 680"/>
+    <path d="M 520 800 A 280 280 0 0 0 240 520"/>
+    <path d="M 680 800 A 440 440 0 0 0 240 360"/>
+  </g>
+</svg>
