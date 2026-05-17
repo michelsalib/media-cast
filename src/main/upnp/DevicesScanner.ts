@@ -1,6 +1,6 @@
 import type { Device, DevicesScanner } from '../../shared/types';
 import { fetchDescription } from './description';
-import { supportsVideoSink } from './protocolInfo';
+import { fetchProtocolInfo } from './protocolInfo';
 import { SsdpScanner } from './ssdp';
 
 export interface UpnpDevice extends Device {
@@ -8,6 +8,9 @@ export interface UpnpDevice extends Device {
   ip: string;
   avTransportControlUrl: string;
   avTransportEventSubUrl: string;
+  // MIME types the renderer claims to accept in its ConnectionManager Sink.
+  // Drives container compatibility decisions in [[checkCompat]].
+  acceptedVideoMimes: ReadonlySet<string>;
 }
 
 interface DeviceRecord extends UpnpDevice {
@@ -48,11 +51,15 @@ export class UpnpDevicesScanner implements DevicesScanner<UpnpDevice> {
       return;
     }
     const previous = this.devices.get(id);
-    if (
-      !previous &&
-      !(await supportsVideoSink(desc.connectionManagerControlUrl).catch(() => false))
-    ) {
-      this.rejectedIds.add(id);
+    const acceptedVideoMimes =
+      previous?.acceptedVideoMimes ??
+      (await fetchProtocolInfo(desc.connectionManagerControlUrl)
+        .then((p) => p.videoMimes)
+        .catch(() => undefined));
+    if (!acceptedVideoMimes || acceptedVideoMimes.size === 0) {
+      if (!previous) {
+        this.rejectedIds.add(id);
+      }
       return;
     }
     const record: DeviceRecord = {
@@ -62,6 +69,7 @@ export class UpnpDevicesScanner implements DevicesScanner<UpnpDevice> {
       ip: new URL(location).hostname,
       avTransportControlUrl: desc.avTransportControlUrl,
       avTransportEventSubUrl: desc.avTransportEventSubUrl,
+      acceptedVideoMimes,
       expiresAt: Date.now() + Math.min(cacheMaxAge * 1000, MAX_TTL_MS),
     };
     this.devices.set(id, record);

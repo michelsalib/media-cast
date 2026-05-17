@@ -3,16 +3,14 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { extname } from 'node:path';
 import { promisify } from 'node:util';
 import send from 'send';
-import { type BurnSubtitles, transcodeToMpegTs, type VideoSize } from './ffmpeg';
+import { type SubtitleSource, transcodeToMpegTs, type VideoSize } from './ffmpeg';
 import { pickLocalIpFor } from './network';
-
-export type { BurnSubtitles, VideoSize } from './ffmpeg';
 
 export interface ServeVideoOptions {
   transcode?: boolean;
   targetIp: string;
   duration?: number;
-  burnSubtitles?: BurnSubtitles;
+  burnSubtitles?: SubtitleSource;
   videoSize?: VideoSize;
   audioTrackIndex?: number;
 }
@@ -27,7 +25,7 @@ export class MediaServer {
   private currentVideoPath?: string;
   private currentVideoTranscode = false;
   private currentDuration?: number;
-  private currentBurnSubtitles?: BurnSubtitles;
+  private currentSubtitleSource?: SubtitleSource;
   private currentVideoSize?: VideoSize;
   private currentAudioTrackIndex?: number;
   private currentSubtitlesData?: Buffer;
@@ -55,7 +53,7 @@ export class MediaServer {
     ];
     if (req.url && videoPaths.includes(req.url)) {
       if (this.currentVideoTranscode) {
-        this.handleTranscodedVideo(req, res, this.currentVideoPath);
+        await this.handleTranscodedVideo(req, res, this.currentVideoPath);
       } else {
         send(req, this.currentVideoPath).pipe(res);
       }
@@ -100,11 +98,11 @@ export class MediaServer {
     res.end('Non supported path');
   }
 
-  private handleTranscodedVideo(
+  private async handleTranscodedVideo(
     req: IncomingMessage,
     res: ServerResponse,
     videoPath: string
-  ): void {
+  ): Promise<void> {
     const seekHeader = req.headers['timeseekrange.dlna.org'];
     const seekSeconds = parseTimeSeekRange(Array.isArray(seekHeader) ? seekHeader[0] : seekHeader);
 
@@ -114,10 +112,10 @@ export class MediaServer {
       return;
     }
 
-    const handle = transcodeToMpegTs({
+    const handle = await transcodeToMpegTs({
       videoPath,
       seekSeconds,
-      burnSubtitles: this.currentBurnSubtitles,
+      burnSubtitles: this.currentSubtitleSource,
       videoSize: this.currentVideoSize,
       audioTrackIndex: this.currentAudioTrackIndex,
     });
@@ -139,7 +137,7 @@ export class MediaServer {
     this.currentVideoPath = videoPath;
     this.currentVideoTranscode = options.transcode ?? false;
     this.currentDuration = options.duration;
-    this.currentBurnSubtitles = options.burnSubtitles;
+    this.currentSubtitleSource = options.burnSubtitles;
     this.currentVideoSize = options.videoSize;
     this.currentAudioTrackIndex = options.audioTrackIndex;
     // For direct-played files some DLNA TVs sniff the URL extension, so reflect

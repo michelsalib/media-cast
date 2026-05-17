@@ -105,6 +105,7 @@ export class PlaybackController {
         deviceType: 'upnp',
         burnSubtitles,
         audioIndex,
+        acceptedVideoMimes: device.acceptedVideoMimes,
       });
 
       // Sidecar subtitles: extract to SMI (the format the DIDL builder defaults to —
@@ -127,7 +128,7 @@ export class PlaybackController {
         await this.renderer.loadVideo({
           title,
           videoUrl,
-          videoMimeType: 'video/mp4',
+          videoMimeType: compat.videoMimeType,
           videoTranscoded: false,
           subtitlesUrl,
           subtitlesFormat: subtitlesUrl ? 'smi' : undefined,

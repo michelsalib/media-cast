@@ -1,9 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import {
-  convertSubtitles,
-  extractSubtitles as ffmpegExtractSubtitles,
-  type SubtitleFormat,
-} from './ffmpeg';
+import { extractSubtitles as ffmpegExtractSubtitles, type SubtitleFormat } from './ffmpeg';
 
 export async function extractSubtitles(
   videoPath: string,
@@ -11,41 +7,57 @@ export async function extractSubtitles(
   format: SubtitleFormat = 'vtt'
 ): Promise<Buffer | undefined> {
   // ffmpeg has no SMI muxer — request SRT bytes then convert in JS.
-  const rawFormat: SubtitleFormat = format === 'smi' ? 'srt' : format;
+  const rawFormat: 'srt' | 'vtt' = format === 'smi' ? 'srt' : format;
   const raw = await readRaw(videoPath, subtitlesPathOrIndex, rawFormat);
   if (!raw) {
     return undefined;
   }
 
   if (format === 'smi') {
-    const srt = stripBom(raw).toString('utf8');
-    return Buffer.from(srtToSmi(srt), 'latin1');
+    return Buffer.from(srtToSmi(decodeText(raw)), 'latin1');
   }
 
   if (format === 'srt') {
     // Old DLNA TVs (Samsung especially) reject UTF-8 SRT. Re-encode as Latin-1.
-    return Buffer.from(stripBom(raw).toString('utf8'), 'latin1');
+    return Buffer.from(decodeText(raw), 'latin1');
   }
 
   return raw;
 }
 
+// External SRTs are commonly saved as Windows-1252 / Latin-1 (especially in European
+// releases), not UTF-8. Blindly using .toString('utf8') turns 0xE9 ("é" in Latin-1)
+// into U+FFFD, which then re-encodes to "?" downstream. Try strict UTF-8 first; on
+// failure, fall back to Windows-1252 (a superset of Latin-1).
+function decodeText(buf: Buffer): string {
+  const stripped = stripBom(buf);
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(stripped);
+  } catch {
+    return new TextDecoder('windows-1252').decode(stripped);
+  }
+}
+
 async function readRaw(
   videoPath: string,
   subtitlesPathOrIndex: string | number | undefined,
-  format: SubtitleFormat
+  format: 'srt' | 'vtt'
 ): Promise<Buffer | undefined> {
   if (subtitlesPathOrIndex === undefined) {
     return undefined;
   }
 
   if (typeof subtitlesPathOrIndex === 'number') {
-    return ffmpegExtractSubtitles(videoPath, subtitlesPathOrIndex, format);
+    return ffmpegExtractSubtitles(
+      { source: 'internal', videoPath, trackIndex: subtitlesPathOrIndex },
+      format
+    );
   }
 
   const lower = subtitlesPathOrIndex.toLowerCase();
 
-  // Passthrough when the on-disk format already matches the target.
+  // Passthrough when the on-disk format already matches the target — avoids ffmpeg's
+  // srt demuxer pre-decoding non-UTF-8 bytes (which would mangle Latin-1 accents).
   if (format === 'srt' && lower.endsWith('.srt')) {
     return readFile(subtitlesPathOrIndex);
   }
@@ -54,7 +66,7 @@ async function readRaw(
   }
 
   if (lower.endsWith('.srt') || lower.endsWith('.ass') || lower.endsWith('.vtt')) {
-    return convertSubtitles(subtitlesPathOrIndex, format);
+    return ffmpegExtractSubtitles({ source: 'external', path: subtitlesPathOrIndex }, format);
   }
 
   return undefined;
