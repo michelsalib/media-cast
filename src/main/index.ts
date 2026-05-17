@@ -30,6 +30,8 @@ function createWindow(): BrowserWindow {
   const mainWindow = new BrowserWindow({
     width: 900,
     height: 670,
+    minWidth: 560,
+    minHeight: 360,
     show: false,
     autoHideMenuBar: true,
     titleBarStyle: 'hidden',
@@ -67,12 +69,6 @@ function createWindow(): BrowserWindow {
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.electron');
 
-  if (!is.dev) {
-    autoUpdater
-      .checkForUpdatesAndNotify()
-      .catch((err) => console.error('update check failed:', err));
-  }
-
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window);
   });
@@ -82,6 +78,15 @@ app.whenReady().then(() => {
   });
 
   const mainWindow = createWindow();
+
+  if (!is.dev) {
+    autoUpdater.on('update-downloaded', () => {
+      sendEvent(mainWindow, 'updateReady', null);
+    });
+    autoUpdater
+      .checkForUpdatesAndNotify()
+      .catch((err) => console.error('update check failed:', err));
+  }
 
   app.on('second-instance', () => {
     if (mainWindow.isMinimized()) mainWindow.restore();
@@ -145,6 +150,9 @@ app.whenReady().then(() => {
     },
     refresh: () => {
       for (const s of scanners) s.refresh();
+    },
+    quitAndInstall: () => {
+      autoUpdater.quitAndInstall();
     },
   };
 

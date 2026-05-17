@@ -1,6 +1,5 @@
 import {
   AppBar,
-  Box,
   Collapse,
   createTheme,
   Stack,
@@ -15,6 +14,7 @@ import AppInfoButton from './components/AppInfoButton';
 import { Connector } from './components/Connector';
 import Dropper from './components/Dropper';
 import Player from './components/Player';
+import UpdateButton from './components/UpdateButton';
 
 const darkTheme = createTheme({
   palette: {
@@ -67,13 +67,27 @@ function App(): React.JSX.Element {
               borderBottom: '1px solid rgba(255,255,255,0.06)',
             }}
           >
-            <Toolbar variant="dense" sx={{ minHeight: 'inherit', height: '32px' }}>
+            <Toolbar
+              variant="dense"
+              disableGutters
+              sx={{
+                minHeight: 'inherit',
+                height: '32px',
+                paddingLeft: 3,
+                paddingRight: 1,
+                // Sized to the draggable area so icons sit flush against the system
+                // window controls without overlap (controls live outside this width).
+                // disableGutters drops the default 24px right padding; we add a small
+                // one back so the icons aren't crammed against the system controls.
+                width: 'env(titlebar-area-width, 100%)',
+                marginLeft: 'env(titlebar-area-x, 0px)',
+              }}
+            >
               <Typography variant="h6" sx={{ fontSize: 12, flexGrow: 1 }}>
                 Media Cast
               </Typography>
+              <UpdateButton />
               <AppInfoButton />
-              {/* Spacer for the Windows/Linux titleBarOverlay window controls. */}
-              <Box sx={{ width: '150px', flexShrink: 0 }} />
             </Toolbar>
           </AppBar>
           <Dropper connected={connected}>

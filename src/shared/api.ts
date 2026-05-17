@@ -22,12 +22,14 @@ export interface SendChannels {
   pause: () => void;
   seek: (time: number) => void;
   refresh: () => void;
+  quitAndInstall: () => void;
 }
 
 // Main → renderer broadcasts.
 export interface EventChannels {
   status: PlayerStatus;
   scan: Device[];
+  updateReady: null;
 }
 
 export type InvokeChannel = keyof InvokeChannels;
@@ -48,6 +50,11 @@ export const SEND_CHANNELS = [
   'pause',
   'seek',
   'refresh',
+  'quitAndInstall',
 ] as const satisfies readonly SendChannel[];
 
-export const EVENT_CHANNELS = ['status', 'scan'] as const satisfies readonly EventChannel[];
+export const EVENT_CHANNELS = [
+  'status',
+  'scan',
+  'updateReady',
+] as const satisfies readonly EventChannel[];
