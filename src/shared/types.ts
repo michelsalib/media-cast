@@ -5,6 +5,7 @@ export interface PlayerStatus {
   currentTime: number;
   duration?: number;
   title?: string;
+  transcoded?: boolean;
 }
 
 export type DeviceType = 'chromecast' | 'upnp';
@@ -33,6 +34,8 @@ export interface AppInfo {
 export interface LoadVideoOptions {
   title: string;
   videoUrl: string;
+  videoMimeType?: string;
+  videoTranscoded?: boolean;
   subtitlesUrl?: string;
   subtitlesFormat?: 'vtt' | 'srt' | 'smi';
   duration?: number;

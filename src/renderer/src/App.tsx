@@ -90,7 +90,7 @@ function App(): React.JSX.Element {
               <AppInfoButton />
             </Toolbar>
           </AppBar>
-          <Dropper connected={connected}>
+          <Dropper device={connectedDevice}>
             <Stack spacing={5} sx={{ margin: 5 }}>
               <Collapse in={!connected} unmountOnExit>
                 <Connector

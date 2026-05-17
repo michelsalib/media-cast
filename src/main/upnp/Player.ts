@@ -50,6 +50,8 @@ export class UpnpPlayer implements Renderer {
   async loadVideo({
     title,
     videoUrl,
+    videoMimeType = 'video/mpeg',
+    videoTranscoded = true,
     subtitlesUrl,
     subtitlesFormat,
     duration,
@@ -57,7 +59,19 @@ export class UpnpPlayer implements Renderer {
     this.currentTitle = title;
     this.duration = duration;
     this.currentTime = 0;
-    const metadata = buildDidlMetadata(title, videoUrl, subtitlesUrl, subtitlesFormat, duration);
+    const metadata = buildDidlMetadata({
+      title,
+      videoUrl,
+      videoMimeType,
+      videoTranscoded,
+      subtitlesUrl,
+      subtitlesFormat,
+      duration,
+    });
+    // Many DLNA renderers reject SetAVTransportURI with 701 "Transition not available" unless
+    // they are STOPPED — so loading a second video without going through close() fails. Stop
+    // first; ignore errors (already-stopped renderers return 701 for Stop itself).
+    await soapCall(this.controlUrl, 'Stop', { InstanceID: '0' }).catch(() => {});
     await soapCall(this.controlUrl, 'SetAVTransportURI', {
       InstanceID: '0',
       CurrentURI: videoUrl,
@@ -68,7 +82,10 @@ export class UpnpPlayer implements Renderer {
     // Wait until the renderer is past preload, then only send Play if it didn't auto-start.
     const state = await this.waitWhileTransitioning(10_000);
     if (state !== 'PLAYING') {
-      await this.play();
+      // Transcoded MPEG-TS streams can leave the TV buffering past the SOAP timeout —
+      // Play then times out even though the TV starts on its own a beat later. GENA
+      // events deliver the real state, so this is best-effort.
+      await this.play().catch((err) => console.warn('[upnp] Play after load failed:', err));
     }
   }
 
@@ -210,13 +227,25 @@ function mapTransportState(state: string | undefined): PlayerState {
   }
 }
 
-function buildDidlMetadata(
-  title: string,
-  videoUrl: string,
-  subtitlesUrl?: string,
-  subtitlesFormat: 'vtt' | 'srt' | 'smi' = 'smi',
-  duration?: number
-): string {
+interface DidlOptions {
+  title: string;
+  videoUrl: string;
+  videoMimeType: string;
+  videoTranscoded: boolean;
+  subtitlesUrl?: string;
+  subtitlesFormat?: 'vtt' | 'srt' | 'smi';
+  duration?: number;
+}
+
+function buildDidlMetadata({
+  title,
+  videoUrl,
+  videoMimeType,
+  videoTranscoded,
+  subtitlesUrl,
+  subtitlesFormat = 'smi',
+  duration,
+}: DidlOptions): string {
   const subMime =
     subtitlesFormat === 'smi'
       ? 'application/smil'
@@ -229,10 +258,12 @@ function buildDidlMetadata(
       `<res protocolInfo="http-get:*:${subMime}:*">${escapeXml(subtitlesUrl)}</res>`
     : '';
 
-  // MPEG-TS container — old Samsung TVs handle this far better than fragmented MP4.
-  // OP=10 → time-seek advertised; FLAGS bit 30 (lsop_TimeBasedSeek) set: CD70.... CI=1 → transcoded.
-  const videoProtocolInfo =
-    'http-get:*:video/mpeg:DLNA.ORG_PN=MPEG_TS_SD_EU_ISO;DLNA.ORG_OP=10;DLNA.ORG_CI=1;DLNA.ORG_FLAGS=CD700000000000000000000000000000';
+  // Transcoded: MPEG-TS, time-based seek (OP=10), CI=1, FLAGS bit 30 (lsop_TimeBasedSeek) set.
+  // Direct play: native container, byte-range seek (OP=01), CI=0, no PN so the TV doesn't
+  // reject the file on a profile/level mismatch.
+  const videoProtocolInfo = videoTranscoded
+    ? `http-get:*:${videoMimeType}:DLNA.ORG_PN=MPEG_TS_SD_EU_ISO;DLNA.ORG_OP=10;DLNA.ORG_CI=1;DLNA.ORG_FLAGS=CD700000000000000000000000000000`
+    : `http-get:*:${videoMimeType}:DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000`;
 
   const durationAttr =
     duration && Number.isFinite(duration) ? ` duration="${secondsToHmsMs(duration)}"` : '';

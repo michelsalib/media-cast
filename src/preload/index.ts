@@ -67,9 +67,14 @@ const api = {
     return invoke.thumbnail(webUtils.getPathForFile(file), width, height);
   },
 
-  load(video: File, subs?: File | number): ReturnType<InvokeChannels['load']> {
+  load(
+    video: File,
+    subs?: File | number,
+    audioIndex?: number,
+    burnSubtitles?: boolean
+  ): ReturnType<InvokeChannels['load']> {
     const subsArg = subs instanceof File ? webUtils.getPathForFile(subs) : subs;
-    return invoke.load(webUtils.getPathForFile(video), subsArg);
+    return invoke.load(webUtils.getPathForFile(video), subsArg, audioIndex, burnSubtitles);
   },
 };
 

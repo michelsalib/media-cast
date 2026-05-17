@@ -13,7 +13,12 @@ export interface InvokeChannels {
   thumbnail: (videoPath: string, width?: number, height?: number) => Promise<Buffer>;
   connect: (deviceId: string) => Promise<void>;
   disconnect: () => Promise<void>;
-  load: (videoPath: string, subtitlesPathOrIndex?: string | number) => Promise<void>;
+  load: (
+    videoPath: string,
+    subtitlesPathOrIndex?: string | number,
+    audioIndex?: number,
+    burnSubtitles?: boolean
+  ) => Promise<void>;
 }
 
 // Renderer → main, fire-and-forget.

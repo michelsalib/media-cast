@@ -31,7 +31,7 @@ function createWindow(): BrowserWindow {
     width: 900,
     height: 670,
     minWidth: 560,
-    minHeight: 360,
+    minHeight: 400,
     show: false,
     autoHideMenuBar: true,
     titleBarStyle: 'hidden',
@@ -135,7 +135,8 @@ app.whenReady().then(() => {
     thumbnail: (videoPath, width, height) => thumbnail(videoPath, width, height),
     connect: (deviceId) => controller.connect(deviceId),
     disconnect: () => controller.disconnect(),
-    load: (videoPath, subtitlesPathOrIndex) => controller.load(videoPath, subtitlesPathOrIndex),
+    load: (videoPath, subtitlesPathOrIndex, audioIndex, burnSubtitles) =>
+      controller.load(videoPath, subtitlesPathOrIndex, audioIndex, burnSubtitles),
   };
 
   const sendHandlers: SendHandlers = {

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { extname } from 'node:path';
 import { promisify } from 'node:util';
 import send from 'send';
 import { type BurnSubtitles, transcodeToMpegTs, type VideoSize } from './ffmpeg';
@@ -13,6 +14,7 @@ export interface ServeVideoOptions {
   duration?: number;
   burnSubtitles?: BurnSubtitles;
   videoSize?: VideoSize;
+  audioTrackIndex?: number;
 }
 
 export interface ServeSubtitlesOptions {
@@ -27,6 +29,7 @@ export class MediaServer {
   private currentDuration?: number;
   private currentBurnSubtitles?: BurnSubtitles;
   private currentVideoSize?: VideoSize;
+  private currentAudioTrackIndex?: number;
   private currentSubtitlesData?: Buffer;
   private currentSubtitlesFormat: 'vtt' | 'srt' | 'smi' = 'vtt';
   private sessionHash = randomUUID();
@@ -48,6 +51,7 @@ export class MediaServer {
       `/${this.sessionHash}/video.ts`,
       `/${this.sessionHash}/video.mp4`,
       `/${this.sessionHash}/video.mpg`,
+      `/${this.sessionHash}/video.mkv`,
     ];
     if (req.url && videoPaths.includes(req.url)) {
       if (this.currentVideoTranscode) {
@@ -115,6 +119,7 @@ export class MediaServer {
       seekSeconds,
       burnSubtitles: this.currentBurnSubtitles,
       videoSize: this.currentVideoSize,
+      audioTrackIndex: this.currentAudioTrackIndex,
     });
 
     res.writeHead(200, transcodedHeaders(this.currentDuration, seekSeconds));
@@ -136,7 +141,11 @@ export class MediaServer {
     this.currentDuration = options.duration;
     this.currentBurnSubtitles = options.burnSubtitles;
     this.currentVideoSize = options.videoSize;
-    const filename = options.transcode ? 'video.ts' : 'video';
+    this.currentAudioTrackIndex = options.audioTrackIndex;
+    // For direct-played files some DLNA TVs sniff the URL extension, so reflect
+    // the source container; transcoded output is always MPEG-TS.
+    const ext = options.transcode ? '.ts' : extname(videoPath).toLowerCase() || '';
+    const filename = `video${ext}`;
     const ip = pickLocalIpFor(options.targetIp);
     return `http://${ip}:${this.port}/${this.sessionHash}/${filename}`;
   }

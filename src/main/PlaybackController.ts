@@ -1,5 +1,6 @@
 import { basename } from 'node:path';
 import type { BrowserWindow } from 'electron';
+import { checkCompat } from '../shared/compat';
 import type { Renderer } from '../shared/types';
 import type { ChromecastDevice } from './chromecast/DevicesScanner';
 import { CastPlayer } from './chromecast/Player';
@@ -18,6 +19,7 @@ export class PlaybackController {
   private renderer?: Renderer;
   private currentDeviceId?: string;
   private statusInterval?: NodeJS.Timeout;
+  private currentlyTranscoded?: boolean;
 
   constructor(
     private readonly window: BrowserWindow,
@@ -46,7 +48,9 @@ export class PlaybackController {
             targetIp: device.ip,
           });
 
-    renderer.onStatus((s) => sendEvent(this.window, 'status', s));
+    renderer.onStatus((s) =>
+      sendEvent(this.window, 'status', { ...s, transcoded: this.currentlyTranscoded })
+    );
     await renderer.connect();
 
     this.renderer = renderer;
@@ -62,7 +66,12 @@ export class PlaybackController {
     await this.teardown();
   }
 
-  async load(videoPath: string, subtitlesPathOrIndex?: string | number): Promise<void> {
+  async load(
+    videoPath: string,
+    subtitlesPathOrIndex?: string | number,
+    audioIndex?: number,
+    burnSubtitles = false
+  ): Promise<void> {
     if (!this.renderer) {
       throw new Error('Not connected');
     }
@@ -83,24 +92,73 @@ export class PlaybackController {
         : undefined;
 
     if (device.type === 'upnp') {
-      // Burn subtitles into the video stream — most reliable on old DLNA TVs.
-      const burnSubtitles =
-        subtitlesPathOrIndex === undefined
-          ? undefined
-          : typeof subtitlesPathOrIndex === 'number'
+      const burnSubtitlesArg =
+        burnSubtitles && subtitlesPathOrIndex !== undefined
+          ? typeof subtitlesPathOrIndex === 'number'
             ? ({ source: 'internal', videoPath, trackIndex: subtitlesPathOrIndex } as const)
-            : ({ source: 'external', path: subtitlesPathOrIndex } as const);
+            : ({ source: 'external', path: subtitlesPathOrIndex } as const)
+          : undefined;
 
+      const compat = checkCompat({
+        videoFileName: videoPath,
+        probeData,
+        deviceType: 'upnp',
+        burnSubtitles,
+        audioIndex,
+      });
+
+      // Sidecar subtitles: extract to SMI (the format the DIDL builder defaults to —
+      // Samsung sec:CaptionInfoEx + pv:subtitleFileUri attrs target this).
+      const sidecarData =
+        !burnSubtitles && subtitlesPathOrIndex !== undefined
+          ? await extractSubtitles(videoPath, subtitlesPathOrIndex, 'smi')
+          : undefined;
+      const subtitlesUrl = sidecarData
+        ? this.server.serveSubtitles(sidecarData, { targetIp, format: 'smi' })
+        : undefined;
+
+      if (!compat.needsTranscoding) {
+        this.currentlyTranscoded = false;
+        const videoUrl = this.server.serveVideo(videoPath, {
+          transcode: false,
+          targetIp,
+          duration,
+        });
+        await this.renderer.loadVideo({
+          title,
+          videoUrl,
+          videoMimeType: 'video/mp4',
+          videoTranscoded: false,
+          subtitlesUrl,
+          subtitlesFormat: subtitlesUrl ? 'smi' : undefined,
+          duration,
+        });
+        return;
+      }
+
+      this.currentlyTranscoded = true;
       const videoUrl = this.server.serveVideo(videoPath, {
         transcode: true,
         targetIp,
         duration,
-        burnSubtitles,
+        burnSubtitles: burnSubtitlesArg,
         videoSize,
+        audioTrackIndex: audioIndex,
       });
-      await this.renderer.loadVideo({ title, videoUrl, duration });
+      await this.renderer.loadVideo({
+        title,
+        videoUrl,
+        videoMimeType: 'video/mpeg',
+        videoTranscoded: true,
+        subtitlesUrl,
+        subtitlesFormat: subtitlesUrl ? 'smi' : undefined,
+        duration,
+      });
       return;
     }
+
+    // Chromecast is always direct play today.
+    this.currentlyTranscoded = false;
 
     // Chromecast path: pass video direct, sidecar WebVTT subs.
     const subtitlesData = await extractSubtitles(videoPath, subtitlesPathOrIndex, 'vtt');
@@ -146,5 +204,6 @@ export class PlaybackController {
     await this.renderer?.close();
     this.renderer = undefined;
     this.currentDeviceId = undefined;
+    this.currentlyTranscoded = undefined;
   }
 }

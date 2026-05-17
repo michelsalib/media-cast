@@ -1,7 +1,8 @@
-import { Cast, LinkOff, Tv } from '@mui/icons-material';
+import { Cast, LinkOff, Memory, Tv } from '@mui/icons-material';
 import {
   alpha,
   Box,
+  Chip,
   IconButton,
   keyframes,
   Slide,
@@ -16,24 +17,46 @@ import { useEffect, useRef, useState } from 'react';
 import type { Device, PlayerStatus } from '../../../shared/types';
 import PlayPause from './PlayPauseSeek';
 
+const marquee = keyframes`
+  0%, 10%   { transform: translateX(0); }
+  50%, 90%  { transform: translateX(calc(-1 * var(--marquee-distance, 0px))); animation-timing-function: steps(1, end); }
+  100%      { transform: translateX(0); }
+`;
+
 type Props = {
   device: Device | null;
   onDisconnect?: () => void;
 };
 
-const wave = keyframes`
-  0%, 100% { opacity: 0.4; transform: scaleY(0.6); }
-  50%      { opacity: 1;   transform: scaleY(1);   }
+const pulse = (color: string) => keyframes`
+  0%, 100% { box-shadow: 0 0 0 0   ${alpha(color, 0.45)}; }
+  50%      { box-shadow: 0 0 0 6px ${alpha(color, 0)};    }
 `;
 
 export default function Player({ device, onDisconnect }: Props): React.JSX.Element {
   const [status, setStatus] = useState<PlayerStatus | undefined>(undefined);
+  const [marqueeDistance, setMarqueeDistance] = useState(0);
   const theme = useTheme();
   const headerRef = useRef<HTMLDivElement>(null);
+  const titleRef = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
     return window.api.onStatus(setStatus);
   }, []);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-run on device change to clear stale status
+  useEffect(() => {
+    setStatus(undefined);
+  }, [device?.id]);
+
+  function startMarquee(): void {
+    const el = titleRef.current;
+    if (!el) return;
+    setMarqueeDistance(Math.max(0, el.scrollWidth - el.clientWidth));
+  }
+  function stopMarquee(): void {
+    setMarqueeDistance(0);
+  }
 
   function seek(_evt: Event, value: number): void {
     window.api.seek(value);
@@ -89,6 +112,7 @@ export default function Player({ device, onDisconnect }: Props): React.JSX.Eleme
                 backgroundColor: alpha(deviceAccent, 0.18),
                 color: deviceAccent,
                 flexShrink: 0,
+                animation: isPlaying ? `${pulse(deviceAccent)} 1.8s ease-out infinite` : 'none',
               }}
             >
               <DeviceIcon fontSize="small" />
@@ -104,44 +128,55 @@ export default function Player({ device, onDisconnect }: Props): React.JSX.Eleme
                 {device?.name}
               </Typography>
             </Stack>
-            {isPlaying && (
-              <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center', ml: 1.5 }}>
-                {[0, 1, 2].map((i) => (
-                  <Box
-                    key={i}
-                    sx={{
-                      width: 3,
-                      height: 14,
-                      borderRadius: 1,
-                      backgroundColor: deviceAccent,
-                      animation: `${wave} 1s ease-in-out ${i * 0.15}s infinite`,
-                      transformOrigin: 'center',
-                    }}
-                  />
-                ))}
-              </Stack>
-            )}
           </Stack>
-          <Tooltip title="Disconnect" placement="left">
-            <IconButton
-              onClick={disconnect}
-              size="small"
-              sx={{
-                color: 'text.secondary',
-                border: '1px solid rgba(255,255,255,0.08)',
-                backgroundColor: alpha(theme.palette.background.paper, 0.6),
-                transition: 'all 180ms ease',
-                '&:hover': {
-                  color: theme.palette.error.light,
-                  borderColor: alpha(theme.palette.error.main, 0.5),
-                  backgroundColor: alpha(theme.palette.error.main, 0.12),
-                  boxShadow: `0 0 12px ${alpha(theme.palette.error.main, 0.35)}`,
-                },
-              }}
-            >
-              <LinkOff fontSize="small" />
-            </IconButton>
-          </Tooltip>
+          <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', flexShrink: 0 }}>
+            {status?.transcoded && (
+              <Tooltip
+                title="ffmpeg is re-encoding this file on the fly for the TV"
+                placement="bottom"
+              >
+                <Chip
+                  size="small"
+                  icon={<Memory />}
+                  label="Transcoding"
+                  sx={{
+                    height: 22,
+                    fontSize: 11,
+                    fontWeight: 600,
+                    letterSpacing: 0.5,
+                    color: theme.palette.warning.light,
+                    backgroundColor: alpha(theme.palette.warning.main, 0.12),
+                    border: `1px solid ${alpha(theme.palette.warning.main, 0.35)}`,
+                    '& .MuiChip-icon': {
+                      color: theme.palette.warning.light,
+                      fontSize: 14,
+                      ml: 0.5,
+                    },
+                  }}
+                />
+              </Tooltip>
+            )}
+            <Tooltip title="Disconnect" placement="left">
+              <IconButton
+                onClick={disconnect}
+                size="small"
+                sx={{
+                  color: 'text.secondary',
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  backgroundColor: alpha(theme.palette.background.paper, 0.6),
+                  transition: 'all 180ms ease',
+                  '&:hover': {
+                    color: theme.palette.error.light,
+                    borderColor: alpha(theme.palette.error.main, 0.5),
+                    backgroundColor: alpha(theme.palette.error.main, 0.12),
+                    boxShadow: `0 0 12px ${alpha(theme.palette.error.main, 0.35)}`,
+                  },
+                }}
+              >
+                <LinkOff fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </Stack>
         </Box>
       </Slide>
 
@@ -153,9 +188,31 @@ export default function Player({ device, onDisconnect }: Props): React.JSX.Eleme
           justifyContent: 'center',
         }}
       >
-        <Typography variant="h3" noWrap sx={{ width: 1 }}>
-          {status?.title || 'no media'}
-        </Typography>
+        <Box
+          onMouseEnter={startMarquee}
+          onMouseLeave={stopMarquee}
+          sx={{ width: 1, overflow: 'hidden' }}
+        >
+          <Typography
+            ref={titleRef}
+            variant="h3"
+            sx={{
+              whiteSpace: 'nowrap',
+              ...(marqueeDistance > 0
+                ? {
+                    display: 'inline-block',
+                    '--marquee-distance': `${marqueeDistance}px`,
+                    animation: `${marquee} ${marqueeDistance / 60 + 3}s ease-in-out infinite`,
+                  }
+                : {
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }),
+            }}
+          >
+            {status?.title || 'no media'}
+          </Typography>
+        </Box>
         <PlayPause status={status} />
         <Slider
           min={0}

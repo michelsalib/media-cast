@@ -124,6 +124,7 @@ export interface TranscodeOptions {
   seekSeconds?: number;
   burnSubtitles?: BurnSubtitles;
   videoSize?: VideoSize;
+  audioTrackIndex?: number;
 }
 
 export interface TranscodeHandle {
@@ -137,7 +138,7 @@ export interface TranscodeHandle {
  * Returns a Readable for the caller to pipe somewhere, plus a kill function.
  */
 export function transcodeToMpegTs(options: TranscodeOptions): TranscodeHandle {
-  const { videoPath, seekSeconds = 0, burnSubtitles, videoSize } = options;
+  const { videoPath, seekSeconds = 0, burnSubtitles, videoSize, audioTrackIndex = 0 } = options;
 
   const args: string[] = [];
   if (seekSeconds > 0) {
@@ -164,7 +165,7 @@ export function transcodeToMpegTs(options: TranscodeOptions): TranscodeHandle {
     '-map',
     '0:v:0',
     '-map',
-    '0:a:0?',
+    `0:a:${audioTrackIndex}?`,
     '-c:v',
     'libx264',
     '-preset',
@@ -238,12 +239,13 @@ function buildSubtitlesFilter(spec: BurnSubtitles, videoSize: VideoSize | undefi
     parts.push(`si=${spec.trackIndex}`);
   }
   if (videoSize) {
-    // libass uses original_size as the reference for font scaling. Default (384x288)
-    // makes subs tiny on HD content.
     parts.push(`original_size=${videoSize.width}x${videoSize.height}`);
   }
-  // 1.5x the libass default (16) for legibility on the TV from across the room.
-  parts.push('force_style=FontSize=24');
+  // SRT has no PlayResY, so libass scales FontSize against storage_height — i.e.
+  // FontSize maps to ~pixels at the output resolution. Pick it as a fraction of
+  // the frame so subs stay the same visual size across 480p / 720p / 1080p / 4K.
+  const fontSize = videoSize ? Math.round(videoSize.height * 0.03) : 18;
+  parts.push(`force_style=FontSize=${fontSize}`);
   return `subtitles=${parts.join(':')}`;
 }
 
