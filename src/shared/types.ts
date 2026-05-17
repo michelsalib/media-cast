@@ -23,10 +23,11 @@ export interface DevicesScanner<D extends Device = Device> {
   close(): void;
 }
 
-export interface FfmpegInfo {
+export interface AppInfo {
+  appVersion: string;
   ffmpegPath: string;
   ffprobePath: string;
-  version: string;
+  ffmpegVersion: string;
 }
 
 export interface LoadVideoOptions {

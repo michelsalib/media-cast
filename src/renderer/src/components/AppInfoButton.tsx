@@ -1,19 +1,19 @@
 import { InfoOutlined } from '@mui/icons-material';
 import { Box, IconButton, Popover, Stack, Typography } from '@mui/material';
 import { useRef, useState } from 'react';
-import type { FfmpegInfo } from '../../../shared/types';
+import type { AppInfo } from '../../../shared/types';
 
-export default function FfmpegInfoButton(): React.JSX.Element {
+export default function AppInfoButton(): React.JSX.Element {
   const anchorRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
-  const [info, setInfo] = useState<FfmpegInfo>();
+  const [info, setInfo] = useState<AppInfo>();
   const [error, setError] = useState<string>();
 
   async function show(): Promise<void> {
     setOpen(true);
     if (!info) {
       try {
-        setInfo(await window.api.ffmpegInfo());
+        setInfo(await window.api.appInfo());
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       }
@@ -49,7 +49,8 @@ export default function FfmpegInfoButton(): React.JSX.Element {
             </Typography>
           ) : info ? (
             <Stack spacing={1}>
-              <Typography variant="body2">{info.version}</Typography>
+              <Typography variant="body2">Media Cast {info.appVersion}</Typography>
+              <Typography variant="body2">{info.ffmpegVersion}</Typography>
               <Typography variant="caption" sx={{ wordBreak: 'break-all' }}>
                 <strong>ffmpeg:</strong> {info.ffmpegPath}
               </Typography>

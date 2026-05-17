@@ -3,10 +3,10 @@ import { electronApp, is, optimizer } from '@electron-toolkit/utils';
 import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import icon from '../../build/icon.png?asset';
-import type { Device, DevicesScanner, Renderer } from '../shared/types';
+import type { AppInfo, Device, DevicesScanner, Renderer } from '../shared/types';
 import { type ChromecastDevice, ChromecastDevicesScanner } from './chromecast/DevicesScanner';
 import { CastPlayer } from './chromecast/Player';
-import { getFfmpegInfo, probe, thumbnail } from './ffmpeg';
+import { ffmpegPath, ffprobePath, getFfmpegVersion, probe, thumbnail } from './ffmpeg';
 import { MediaServer } from './MediaServer';
 import { extractSubtitles } from './subtitleExtractor';
 import { type UpnpDevice, UpnpDevicesScanner } from './upnp/DevicesScanner';
@@ -122,7 +122,15 @@ app.whenReady().then(() => {
 
   ipcMain.handle('probe', (_event, path: string) => probe(path));
 
-  ipcMain.handle('ffmpegInfo', () => getFfmpegInfo());
+  ipcMain.handle(
+    'appInfo',
+    async (): Promise<AppInfo> => ({
+      appVersion: app.getVersion(),
+      ffmpegPath,
+      ffprobePath,
+      ffmpegVersion: await getFfmpegVersion(),
+    })
+  );
 
   ipcMain.handle('thumbnail', (_event, path: string, width?: number, height?: number) =>
     thumbnail(path, width, height)

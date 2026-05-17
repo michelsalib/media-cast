@@ -12,7 +12,7 @@ import CssBaseline from '@mui/material/CssBaseline';
 import { useState } from 'react';
 import { Connector } from './components/Connector';
 import Dropper from './components/Dropper';
-import FfmpegInfoButton from './components/FfmpegInfoButton';
+import AppInfoButton from './components/AppInfoButton';
 import Player from './components/Player';
 import type { Device } from '../../shared/types';
 
@@ -71,7 +71,7 @@ function App(): React.JSX.Element {
               <Typography variant="h6" sx={{ fontSize: 12, flexGrow: 1 }}>
                 Media Cast
               </Typography>
-              <FfmpegInfoButton />
+              <AppInfoButton />
               {/* Spacer for the Windows/Linux titleBarOverlay window controls. */}
               <Box sx={{ width: '150px', flexShrink: 0 }} />
             </Toolbar>

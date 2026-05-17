@@ -1,7 +1,7 @@
 import { electronAPI } from '@electron-toolkit/preload';
 import { contextBridge, type IpcRendererEvent, ipcRenderer, webUtils } from 'electron';
 import type { FFProbeData } from '../main/ffmpeg';
-import type { Device, FfmpegInfo, PlayerStatus } from '../shared/types';
+import type { AppInfo, Device, PlayerStatus } from '../shared/types';
 
 export type MediaCastApi = typeof api;
 
@@ -56,8 +56,8 @@ const api = {
     return ipcRenderer.invoke('probe', webUtils.getPathForFile(path));
   },
 
-  ffmpegInfo(): Promise<FfmpegInfo> {
-    return ipcRenderer.invoke('ffmpegInfo');
+  appInfo(): Promise<AppInfo> {
+    return ipcRenderer.invoke('appInfo');
   },
 
   thumbnail(path: File, width?: number, height?: number): Promise<Buffer> {

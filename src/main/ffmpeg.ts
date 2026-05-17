@@ -4,7 +4,6 @@ import path from 'node:path';
 import type { Readable } from 'node:stream';
 import { promisify } from 'node:util';
 import { app } from 'electron';
-import type { FfmpegInfo } from '../shared/types';
 
 // Binaries live under resources/bin/<platform>-<arch>/. In dev that's <projectRoot>/resources/bin/,
 // in packaged builds it's <process.resourcesPath>/bin/ (via electron-builder extraResources).
@@ -72,11 +71,12 @@ export function convertSubtitles(
   return runFfmpeg(['-i', subtitlepath, '-f', muxerFor(format), 'pipe:1']);
 }
 
-export async function getFfmpegInfo(): Promise<FfmpegInfo> {
+export { ffmpegPath, ffprobePath };
+
+export async function getFfmpegVersion(): Promise<string> {
   const { stdout } = await promisify(execFile)(ffmpegPath, ['-version']);
   // First line: e.g. "ffmpeg version 7.0 Copyright (c) 2000-2024 the FFmpeg developers"
-  const version = stdout.split('\n')[0].trim();
-  return { ffmpegPath, ffprobePath, version };
+  return stdout.split('\n')[0].trim();
 }
 
 export async function probe(videoPath: string): Promise<FFProbeData> {
