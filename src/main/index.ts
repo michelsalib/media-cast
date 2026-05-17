@@ -1,16 +1,21 @@
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
 import { electronApp, is, optimizer } from '@electron-toolkit/utils';
-import { app, BrowserWindow, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, shell } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import icon from '../../build/icon.png?asset';
-import type { AppInfo, Device, DevicesScanner, Renderer } from '../shared/types';
+import type { Device, DevicesScanner } from '../shared/types';
 import { type ChromecastDevice, ChromecastDevicesScanner } from './chromecast/DevicesScanner';
-import { CastPlayer } from './chromecast/Player';
 import { ffmpegPath, ffprobePath, getFfmpegVersion, probe, thumbnail } from './ffmpeg';
+import {
+  type InvokeHandlers,
+  registerInvokeHandlers,
+  registerSendHandlers,
+  type SendHandlers,
+  sendEvent,
+} from './ipc';
 import { MediaServer } from './MediaServer';
-import { extractSubtitles } from './subtitleExtractor';
+import { PlaybackController } from './PlaybackController';
 import { type UpnpDevice, UpnpDevicesScanner } from './upnp/DevicesScanner';
-import { UpnpPlayer } from './upnp/Player';
 
 const port = 4004;
 
@@ -63,7 +68,9 @@ app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.electron');
 
   if (!is.dev) {
-    autoUpdater.checkForUpdatesAndNotify().catch((err) => console.error('update check failed:', err));
+    autoUpdater
+      .checkForUpdatesAndNotify()
+      .catch((err) => console.error('update check failed:', err));
   }
 
   app.on('browser-window-created', (_, window) => {
@@ -73,9 +80,6 @@ app.whenReady().then(() => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
-
-  let renderer: Renderer | undefined;
-  let currentDeviceId: string | undefined;
 
   const mainWindow = createWindow();
 
@@ -89,6 +93,7 @@ app.whenReady().then(() => {
   const server = new MediaServer(port);
 
   const knownDevices = new Map<string, KnownDevice>();
+  const controller = new PlaybackController(mainWindow, server, () => knownDevices);
 
   function broadcastDevices(): void {
     const devices: Device[] = [...knownDevices.values()].map((d) => ({
@@ -97,7 +102,7 @@ app.whenReady().then(() => {
       name: d.name,
       ip: d.ip,
     }));
-    mainWindow.webContents.send('scan', devices);
+    sendEvent(mainWindow, 'scan', devices);
   }
 
   function wireScanner<D extends KnownDevice>(scanner: DevicesScanner<D>): void {
@@ -114,134 +119,40 @@ app.whenReady().then(() => {
 
   const scanners: DevicesScanner[] = [chromecastScanner, upnpScanner];
 
-  ipcMain.on('scan', () => {
-    for (const s of scanners) s.refresh();
-  });
-
-  ipcMain.on('status', () => renderer?.getStatus());
-
-  ipcMain.handle('probe', (_event, path: string) => probe(path));
-
-  ipcMain.handle(
-    'appInfo',
-    async (): Promise<AppInfo> => ({
+  const invokeHandlers: InvokeHandlers = {
+    probe: (videoPath) => probe(videoPath),
+    appInfo: async () => ({
       appVersion: app.getVersion(),
       ffmpegPath,
       ffprobePath,
       ffmpegVersion: await getFfmpegVersion(),
-    })
-  );
+    }),
+    thumbnail: (videoPath, width, height) => thumbnail(videoPath, width, height),
+    connect: (deviceId) => controller.connect(deviceId),
+    disconnect: () => controller.disconnect(),
+    load: (videoPath, subtitlesPathOrIndex) => controller.load(videoPath, subtitlesPathOrIndex),
+  };
 
-  ipcMain.handle('thumbnail', (_event, path: string, width?: number, height?: number) =>
-    thumbnail(path, width, height)
-  );
+  const sendHandlers: SendHandlers = {
+    play: () => {
+      void controller.play();
+    },
+    pause: () => {
+      void controller.pause();
+    },
+    seek: (time) => {
+      void controller.seek(time);
+    },
+    refresh: () => {
+      for (const s of scanners) s.refresh();
+    },
+  };
 
-  ipcMain.handle('connect', async (_event, deviceId: string) => {
-    if (deviceId === currentDeviceId) {
-      return;
-    }
-
-    const device = knownDevices.get(deviceId);
-    if (!device) {
-      throw new Error(`Unknown device: ${deviceId}`);
-    }
-
-    await renderer?.close();
-
-    if (device.type === 'chromecast') {
-      renderer = new CastPlayer(device.ip);
-    } else {
-      renderer = new UpnpPlayer({
-        avTransportControlUrl: device.avTransportControlUrl,
-        avTransportEventSubUrl: device.avTransportEventSubUrl,
-        targetIp: device.ip,
-      });
-    }
-
-    renderer.onStatus((s) => mainWindow.webContents.send('status', s));
-    await renderer.connect();
-    currentDeviceId = deviceId;
-  });
-
-  ipcMain.handle('disconnect', async () => {
-    await renderer?.close();
-    renderer = undefined;
-    currentDeviceId = undefined;
-  });
-
-  ipcMain.on('load', async (_evt, videoPath, subtitlesPathOrIndex) => {
-    if (!renderer) {
-      return;
-    }
-    const device = knownDevices.get(currentDeviceId ?? '');
-    if (!device?.ip) {
-      console.error('load failed: no current device');
-      return;
-    }
-
-    try {
-      const targetIp = device.ip;
-      const probeData = await probe(videoPath);
-      const rawDuration = Number(probeData.format.duration);
-      const duration = Number.isFinite(rawDuration) ? rawDuration : undefined;
-      const title = basename(videoPath);
-      const videoStream = probeData.streams.find((s) => s.codec_type === 'video');
-      const videoSize =
-        videoStream?.width && videoStream?.height
-          ? { width: videoStream.width, height: videoStream.height }
-          : undefined;
-
-      if (device.type === 'upnp') {
-        // Burn subtitles into the video stream — most reliable on old DLNA TVs.
-        const burnSubtitles =
-          subtitlesPathOrIndex === undefined
-            ? undefined
-            : typeof subtitlesPathOrIndex === 'number'
-              ? ({ source: 'internal', videoPath, trackIndex: subtitlesPathOrIndex } as const)
-              : ({ source: 'external', path: subtitlesPathOrIndex } as const);
-
-        const videoUrl = server.serveVideo(videoPath, {
-          transcode: true,
-          targetIp,
-          duration,
-          burnSubtitles,
-          videoSize,
-        });
-        await renderer.loadVideo({ title, videoUrl, duration });
-        return;
-      }
-
-      // Chromecast path: pass video direct, sidecar WebVTT subs.
-      const subtitlesData = await extractSubtitles(videoPath, subtitlesPathOrIndex, 'vtt');
-      const videoUrl = server.serveVideo(videoPath, {
-        transcode: false,
-        targetIp,
-        duration,
-      });
-      const subtitlesUrl = subtitlesData
-        ? server.serveSubtitles(subtitlesData, { targetIp, format: 'vtt' })
-        : undefined;
-
-      await renderer.loadVideo({
-        title,
-        videoUrl,
-        subtitlesUrl,
-        subtitlesFormat: 'vtt',
-        duration,
-      });
-    } catch (err) {
-      console.error('load failed:', err);
-    }
-  });
-
-  ipcMain.on('seek', (_evt, time) => renderer?.seek(time));
-
-  ipcMain.on('pause', () => renderer?.pause());
-
-  ipcMain.on('play', () => renderer?.play());
+  registerInvokeHandlers(invokeHandlers);
+  registerSendHandlers(sendHandlers);
 
   mainWindow.on('closed', async () => {
-    await renderer?.close();
+    await controller.close();
     for (const s of scanners) s.close();
     await server.close();
   });

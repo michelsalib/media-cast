@@ -4,15 +4,15 @@ import {
   AccordionActions,
   AccordionDetails,
   AccordionSummary,
+  alpha,
   Backdrop,
   Box,
   Button,
+  keyframes,
   Stack,
   type SxProps,
   Tooltip,
   Typography,
-  alpha,
-  keyframes,
   useTheme,
 } from '@mui/material';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -327,10 +327,7 @@ export default function Dropper(props: Props): React.JSX.Element {
               />
             </Stack>
             {video && (
-              <VideoInfoButton
-                video={video}
-                sx={{ position: 'absolute', top: 8, right: 8 }}
-              />
+              <VideoInfoButton video={video} sx={{ position: 'absolute', top: 8, right: 8 }} />
             )}
           </Box>
         </AccordionDetails>

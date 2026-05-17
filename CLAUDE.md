@@ -66,8 +66,8 @@ Each session uses a fresh UUID URL prefix so old TVs don't cache prior content. 
 State is flat — `useState` only, ownership by component:
 
 - [App.tsx](src/renderer/src/App.tsx) — `connectedDevice`; toggles `<Connector>` vs `<Player>`. Theme defined inline here.
-- [Connector.tsx](src/renderer/src/components/Connector.tsx) — subscribes `onScan`; owns `DISCONNECTED → LOADING → CONNECTED`.
-- [Player.tsx](src/renderer/src/components/Player.tsx) — **status is poll-then-push**: `setInterval(() => window.api.status(), 1000)` tells main to re-emit; the result arrives via `onStatus`. Without the polling tick, the UI only updates on player-side events.
+- [Connector.tsx](src/renderer/src/components/Connector.tsx) — subscribes `onScan` and triggers an initial `refresh` on mount; owns `DISCONNECTED → LOADING → CONNECTED`.
+- [Player.tsx](src/renderer/src/components/Player.tsx) — subscribes `onStatus`. The 1s ticker that drives between player-side status events lives in [PlaybackController](src/main/PlaybackController.ts), not the renderer.
 - [Dropper.tsx](src/renderer/src/components/Dropper.tsx) — drag-and-drop ingestion. Discriminator is filename suffix: `.mp4`/`.mkv` → video, anything else → subs. Thumbnail regenerated per video via `window.api.thumbnail`.
 
 [SubtitlesSelection.ts](src/renderer/src/components/SubtitlesSelection.ts) is a 3-arm union (`internal` / `external` / `no subtitles`); [SubtitlesSelector.tsx](src/renderer/src/components/SubtitlesSelector.tsx) builds choices from `window.api.probe` + the optional sidecar, auto-selects `external > internal > none`. Dropper maps it to the `load` IPC's `subtitlesPathOrIndex` (string | number | undefined) — that's what main keys on for burn-in vs sidecar.
@@ -76,10 +76,16 @@ Cross-process type imports (e.g. `import type { FFProbeData } from '../../../mai
 
 ## IPC channels
 
-Wrappers in [src/preload/index.ts](src/preload/index.ts), handlers in [src/main/index.ts](src/main/index.ts):
+Single contract in [src/shared/api.ts](src/shared/api.ts) — three interfaces `InvokeChannels`, `SendChannels`, `EventChannels` plus matching `*_CHANNELS` const arrays. Drift between main and preload becomes a compile error.
 
-- `scan`, `status` — bidirectional broadcasts
-- `connect`, `disconnect`, `probe`, `ffmpegInfo`, `thumbnail` — invoke/handle
-- `load`, `play`, `pause`, `seek` — fire-and-forget
+- `InvokeChannels` (renderer → main, awaited): `probe`, `appInfo`, `thumbnail`, `connect`, `disconnect`, `load`
+- `SendChannels` (renderer → main, fire-and-forget): `play`, `pause`, `seek`, `refresh`
+- `EventChannels` (main → renderer broadcasts): `status`, `scan`
 
-Adding a channel: handler in main + wrapper in preload — renderer gets it typed through `window.api` automatically.
+[src/preload/index.ts](src/preload/index.ts) auto-derives bindings from the contract via `makeInvoke`/`makeSend`/`makeOn`, then overrides `load`/`probe`/`thumbnail` with `File`-accepting wrappers that call `webUtils.getPathForFile()` before crossing IPC.
+
+[src/main/index.ts](src/main/index.ts) registers handlers through `registerInvokeHandlers`/`registerSendHandlers` from [src/main/ipc.ts](src/main/ipc.ts) — the handler maps are typed against `InvokeHandlers`/`SendHandlers`, so a missing or mis-typed handler fails to compile. Broadcasts use `sendEvent(window, channel, payload)` for typed pushes.
+
+Most playback logic lives in [src/main/PlaybackController.ts](src/main/PlaybackController.ts) — `index.ts` is wiring. The controller owns the active `Renderer`, the 1s status tick, and the device-type branching in `load`.
+
+Adding a channel: add to the contract → handler in main and preload wrapper become compile errors until implemented. Renderer gets the new method typed on `window.api` automatically.

@@ -1,8 +1,8 @@
-import { readFile, writeFile, mkdir, copyFile, rm } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
-import sharp from 'sharp';
+import { fileURLToPath } from 'node:url';
 import IconGen from 'icon-gen';
+import sharp from 'sharp';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SVG = resolve(ROOT, 'build/icon.svg');

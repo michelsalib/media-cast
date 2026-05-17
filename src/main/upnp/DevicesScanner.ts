@@ -48,7 +48,10 @@ export class UpnpDevicesScanner implements DevicesScanner<UpnpDevice> {
       return;
     }
     const previous = this.devices.get(id);
-    if (!previous && !(await supportsVideoSink(desc.connectionManagerControlUrl).catch(() => false))) {
+    if (
+      !previous &&
+      !(await supportsVideoSink(desc.connectionManagerControlUrl).catch(() => false))
+    ) {
       this.rejectedIds.add(id);
       return;
     }

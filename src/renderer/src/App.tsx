@@ -10,11 +10,11 @@ import {
 } from '@mui/material';
 import CssBaseline from '@mui/material/CssBaseline';
 import { useState } from 'react';
+import type { Device } from '../../shared/types';
+import AppInfoButton from './components/AppInfoButton';
 import { Connector } from './components/Connector';
 import Dropper from './components/Dropper';
-import AppInfoButton from './components/AppInfoButton';
 import Player from './components/Player';
-import type { Device } from '../../shared/types';
 
 const darkTheme = createTheme({
   palette: {

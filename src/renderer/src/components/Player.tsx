@@ -1,14 +1,14 @@
 import { Cast, LinkOff, Tv } from '@mui/icons-material';
 import {
+  alpha,
   Box,
   IconButton,
+  keyframes,
   Slide,
   Slider,
   Stack,
   Tooltip,
   Typography,
-  alpha,
-  keyframes,
   useTheme,
 } from '@mui/material';
 import format from 'format-duration';
@@ -32,14 +32,7 @@ export default function Player({ device, onDisconnect }: Props): React.JSX.Eleme
   const headerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const unsubscribe = window.api.onStatus(setStatus);
-    const intervalId = setInterval(() => {
-      window.api.status();
-    }, 1000);
-    return () => {
-      unsubscribe();
-      clearInterval(intervalId);
-    };
+    return window.api.onStatus(setStatus);
   }, []);
 
   function seek(_evt: Event, value: number): void {
@@ -58,7 +51,13 @@ export default function Player({ device, onDisconnect }: Props): React.JSX.Eleme
 
   return (
     <Box>
-      <Slide direction="down" in={!!device} container={headerRef.current} mountOnEnter unmountOnExit>
+      <Slide
+        direction="down"
+        in={!!device}
+        container={headerRef.current}
+        mountOnEnter
+        unmountOnExit
+      >
         <Box
           ref={headerRef}
           sx={{

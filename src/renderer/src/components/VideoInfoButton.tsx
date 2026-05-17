@@ -1,5 +1,6 @@
 import { InfoOutlined } from '@mui/icons-material';
 import {
+  alpha,
   Box,
   Divider,
   IconButton,
@@ -7,12 +8,10 @@ import {
   Stack,
   type SxProps,
   Typography,
-  alpha,
   useTheme,
 } from '@mui/material';
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import type { FFProbeData } from '../../../main/ffmpeg';
-
 
 interface Props {
   video: File;
@@ -24,13 +23,16 @@ export default function VideoInfoButton({ video, sx }: Props): React.JSX.Element
   const [open, setOpen] = useState(false);
   const [info, setInfo] = useState<FFProbeData>();
   const [error, setError] = useState<string>();
+  const [lastVideo, setLastVideo] = useState(video);
   const theme = useTheme();
 
-  // Reset cached probe data whenever the video changes.
-  useEffect(() => {
+  // Render-phase reset of cached probe data when the video prop changes.
+  // https://react.dev/learn/you-might-not-need-an-effect#resetting-all-state-when-a-prop-changes
+  if (lastVideo !== video) {
+    setLastVideo(video);
     setInfo(undefined);
     setError(undefined);
-  }, [video]);
+  }
 
   async function show(event: React.MouseEvent): Promise<void> {
     event.stopPropagation();

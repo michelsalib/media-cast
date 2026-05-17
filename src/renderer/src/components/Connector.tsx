@@ -1,15 +1,15 @@
 import { Cast, CheckCircle, Refresh, Tv } from '@mui/icons-material';
 import {
+  alpha,
   Box,
   Card,
   CardActionArea,
   Chip,
   CircularProgress,
   IconButton,
+  keyframes,
   Stack,
   Typography,
-  alpha,
-  keyframes,
   useTheme,
 } from '@mui/material';
 import { useEffect, useState } from 'react';
@@ -50,6 +50,7 @@ export function Connector({ onChange }: Props): React.JSX.Element {
   }
 
   useEffect(() => {
+    window.api.refresh();
     return window.api.onScan(setDevices);
   }, []);
 
@@ -184,9 +185,7 @@ export function Connector({ onChange }: Props): React.JSX.Element {
                       )}
                     </Box>
                     {isConnected && (
-                      <CheckCircle
-                        sx={{ color: theme.palette.success.main, fontSize: 20 }}
-                      />
+                      <CheckCircle sx={{ color: theme.palette.success.main, fontSize: 20 }} />
                     )}
                   </Stack>
 
