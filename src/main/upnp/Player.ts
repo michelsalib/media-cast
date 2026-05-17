@@ -37,13 +37,11 @@ export class UpnpPlayer implements Renderer {
 
   async close(): Promise<void> {
     await soapCall(this.controlUrl, 'Stop', { InstanceID: '0' }).catch(() => {});
-    // Stop alone leaves the video loaded on most DLNA renderers (TV still shows the title /
-    // last frame). Clearing the AVTransport URI is what actually unloads it.
-    await soapCall(this.controlUrl, 'SetAVTransportURI', {
-      InstanceID: '0',
-      CurrentURI: '',
-      CurrentURIMetaData: '',
-    }).catch(() => {});
+    // Note: don't SetAVTransportURI('') here. On LG TVs the empty-URI call leaves the
+    // renderer in vendor-specific LG_TRANSITIONING and it never resolves — every later
+    // SetAVTransportURI then fails with UPnP 701 "Transition not available" until the
+    // TV is rebooted. Stop alone leaves the title/last frame on screen, which is the
+    // lesser evil; the next load replaces it anyway.
     await this.eventing.stop();
   }
 
@@ -68,10 +66,11 @@ export class UpnpPlayer implements Renderer {
       subtitlesFormat,
       duration,
     });
-    // Many DLNA renderers reject SetAVTransportURI with 701 "Transition not available" unless
-    // they are STOPPED — so loading a second video without going through close() fails. Stop
-    // first; ignore errors (already-stopped renderers return 701 for Stop itself).
-    await soapCall(this.controlUrl, 'Stop', { InstanceID: '0' }).catch(() => {});
+    // LG TVs return UPnP 701 "Transition not available" on SetAVTransportURI while their
+    // vendor-specific LG_TRANSITIONING state is active (the previous session's close() —
+    // Stop + clear-URI — leaves the TV transitioning across an app restart). Wait it out
+    // before issuing the new URI.
+    await this.waitWhileTransitioning(5_000);
     await soapCall(this.controlUrl, 'SetAVTransportURI', {
       InstanceID: '0',
       CurrentURI: videoUrl,
@@ -95,7 +94,9 @@ export class UpnpPlayer implements Renderer {
       try {
         const xml = await soapCall(this.controlUrl, 'GetTransportInfo', { InstanceID: '0' });
         const state = extractTag(xml, 'CurrentTransportState')?.trim();
-        if (state && state !== 'TRANSITIONING') {
+        // LG reports vendor-specific "LG_TRANSITIONING" instead of the spec "TRANSITIONING";
+        // match any state containing "TRANSITIONING" so we don't proceed prematurely.
+        if (state && !state.includes('TRANSITIONING')) {
           return state;
         }
       } catch {
