@@ -180,9 +180,9 @@ export default function Dropper(props: Props): React.JSX.Element {
         >
           <Box
             sx={{
-              width: 32,
+              width: thumbnailUrl ? (32 * 16) / 9 : 32,
               height: 32,
-              borderRadius: 1.5,
+              borderRadius: thumbnailUrl ? 0.5 : 1.5,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
