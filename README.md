@@ -1,43 +1,51 @@
 # media-cast
 
-An app to stream local media to chromecast enabled device.
+Stream local video files from your computer to a TV — no setup on the TV side, no media library to configure, no account to create. Just drop a file in and play.
 
-For now required ffmpeg/ffprobe to be available on the computer.
+Works with **Chromecast** and **UPnP/DLNA** devices on your local network.
 
-Why this app ?
+## Features
 
-- No need of any setup on the TV
-- Enables external and packed subtitles
-- Simple GUI
-- Provides a platform for later support of re-encoding, dlna, ...
+- Zero TV-side setup — discovers Chromecast and DLNA renderers automatically on your LAN
+- External (`.srt`, `.smi`, …) and embedded subtitle tracks, with on-the-fly conversion
+- Subtitle burn-in for older DLNA TVs that ignore sidecar subs
+- MPEG-TS transcoding for renderers that can't play your source format directly
+- Drag-and-drop interface — drop the video, drop the subs, hit play
+- Bundled `ffmpeg` / `ffprobe` — nothing else to install
 
-## Recommended IDE Setup
+## Download
 
-- [VSCode](https://code.visualstudio.com/) + [ESLint](https://marketplace.visualstudio.com/items?itemName=dbaeumer.vscode-eslint) + [Prettier](https://marketplace.visualstudio.com/items?itemName=esbenp.prettier-vscode)
+Grab the latest installer for your OS from the [Releases page](https://github.com/michelsalib/media-cast/releases/latest):
 
-## Project Setup
+- **Windows** — `.exe` installer
+- **macOS** — `.dmg` (universal, Intel + Apple Silicon)
+- **Linux** — `.AppImage`
 
-### Install
+Auto-updates are built in, so once installed you'll be notified about new versions.
+
+## How it works
+
+1. Launch the app — it scans your network for compatible devices.
+2. Pick a TV / speaker / Chromecast from the list.
+3. Drop a video file (and optionally a subtitle file) onto the player.
+4. Press play.
+
+## Building from source
+
+Requires Node.js 24+.
 
 ```bash
-$ npm install
+npm install
+npm run prepare:binaries   # fetch static ffmpeg/ffprobe into resources/bin/
+npm run dev                # electron-vite dev with HMR
 ```
 
-### Development
+To produce installers:
 
 ```bash
-$ npm run dev
+npm run build:win     # Windows
+npm run build:mac     # macOS (universal)
+npm run build:linux   # Linux
 ```
 
-### Build
-
-```bash
-# For windows
-$ npm run build:win
-
-# For macOS
-$ npm run build:mac
-
-# For Linux
-$ npm run build:linux
-```
+Tooling: [electron-vite](https://electron-vite.org/), [Biome](https://biomejs.dev/) for lint+format, [tsgo](https://github.com/microsoft/typescript-go) for typecheck. See [CLAUDE.md](CLAUDE.md) for an architecture overview.
