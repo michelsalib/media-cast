@@ -11,6 +11,8 @@ export interface ChromecastDevice extends Device {
 // NIC. The type is `Partial<ServiceConfig>` upstream and doesn't surface this option.
 type BonjourOpts = ConstructorParameters<typeof Bonjour>[0] & { interface?: string };
 
+const RECONCILE_INTERVAL_MS = 10_000;
+
 export class ChromecastDevicesScanner implements DevicesScanner<ChromecastDevice> {
   readonly type = 'chromecast';
   // One Bonjour per LAN interface — multicast-dns only sets the outbound NIC once per instance,
@@ -19,9 +21,23 @@ export class ChromecastDevicesScanner implements DevicesScanner<ChromecastDevice
   private readonly instances: { bonjour: Bonjour; browser: Browser }[] = [];
   private readonly devices = new Map<string, ChromecastDevice>();
   private devicesCallback?: (devices: ChromecastDevice[]) => void;
+  private currentAddrs = '';
+  private readonly reconcileTimer: NodeJS.Timeout;
 
   constructor() {
-    const addrs = localIPv4Addresses();
+    this.reconcile();
+    this.reconcileTimer = setInterval(() => this.reconcile(), RECONCILE_INTERVAL_MS);
+  }
+
+  // Rebuild Bonjour instances if the LAN interface set has changed (e.g. VPN toggled).
+  private reconcile(): void {
+    const addrs = localIPv4Addresses().sort();
+    const key = addrs.join(',');
+    if (key === this.currentAddrs && this.instances.length > 0) {
+      return;
+    }
+    this.currentAddrs = key;
+    this.teardownInstances();
     const optsList: BonjourOpts[] = addrs.length > 0 ? addrs.map((a) => ({ interface: a })) : [{}];
     for (const opts of optsList) {
       const bonjour = new Bonjour(opts);
@@ -30,6 +46,14 @@ export class ChromecastDevicesScanner implements DevicesScanner<ChromecastDevice
       browser.on('down', (service) => this.remove(service));
       this.instances.push({ bonjour, browser });
     }
+  }
+
+  private teardownInstances(): void {
+    for (const { bonjour, browser } of this.instances) {
+      browser.stop();
+      bonjour.destroy();
+    }
+    this.instances.length = 0;
   }
 
   private upsert(service: Service): void {
@@ -66,15 +90,13 @@ export class ChromecastDevicesScanner implements DevicesScanner<ChromecastDevice
   }
 
   refresh(): void {
+    this.reconcile();
     this.emit();
   }
 
   close(): void {
-    for (const { bonjour, browser } of this.instances) {
-      browser.stop();
-      bonjour.destroy();
-    }
-    this.instances.length = 0;
+    clearInterval(this.reconcileTimer);
+    this.teardownInstances();
   }
 }
 
