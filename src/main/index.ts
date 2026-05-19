@@ -1,7 +1,18 @@
 import { join } from 'node:path';
 import { electronApp, is, optimizer } from '@electron-toolkit/utils';
 import { app, BrowserWindow, shell } from 'electron';
+import log from 'electron-log/main';
 import { autoUpdater } from 'electron-updater';
+
+log.initialize();
+Object.assign(console, log.functions);
+
+// Route renderer logs to a separate file. The renderer creates a logger with this
+// same `logId`; electron-log's IPC transport tags messages with it so main routes
+// them through this logger instead of the default one.
+const rendererLog = log.create({ logId: 'renderer' });
+rendererLog.transports.file.fileName = 'renderer.log';
+
 import icon from '../../build/icon.png?asset';
 import type { Device, DevicesScanner } from '../shared/types';
 import { type ChromecastDevice, ChromecastDevicesScanner } from './chromecast/DevicesScanner';
@@ -45,6 +56,7 @@ function createWindow(): BrowserWindow {
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
+      devTools: is.dev,
     },
   });
 
