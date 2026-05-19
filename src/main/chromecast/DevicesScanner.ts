@@ -1,3 +1,4 @@
+import { networkInterfaces } from 'node:os';
 import { Bonjour, type Browser, type Service } from 'bonjour-service';
 import type { Device, DevicesScanner } from '../../shared/types';
 
@@ -6,17 +7,29 @@ export interface ChromecastDevice extends Device {
   ip: string;
 }
 
+// bonjour-service forwards `interface` to multicast-dns, which uses it as the outbound multicast
+// NIC. The type is `Partial<ServiceConfig>` upstream and doesn't surface this option.
+type BonjourOpts = ConstructorParameters<typeof Bonjour>[0] & { interface?: string };
+
 export class ChromecastDevicesScanner implements DevicesScanner<ChromecastDevice> {
   readonly type = 'chromecast';
-  private readonly bonjour = new Bonjour();
-  private readonly browser: Browser;
+  // One Bonjour per LAN interface — multicast-dns only sets the outbound NIC once per instance,
+  // so a single Bonjour sends queries down the default route (the VPN tunnel on multi-homed hosts)
+  // and never reaches the LAN Chromecast.
+  private readonly instances: { bonjour: Bonjour; browser: Browser }[] = [];
   private readonly devices = new Map<string, ChromecastDevice>();
   private devicesCallback?: (devices: ChromecastDevice[]) => void;
 
   constructor() {
-    this.browser = this.bonjour.find({ type: 'googlecast' });
-    this.browser.on('up', (service) => this.upsert(service));
-    this.browser.on('down', (service) => this.remove(service));
+    const addrs = localIPv4Addresses();
+    const optsList: BonjourOpts[] = addrs.length > 0 ? addrs.map((a) => ({ interface: a })) : [{}];
+    for (const opts of optsList) {
+      const bonjour = new Bonjour(opts);
+      const browser = bonjour.find({ type: 'googlecast' });
+      browser.on('up', (service) => this.upsert(service));
+      browser.on('down', (service) => this.remove(service));
+      this.instances.push({ bonjour, browser });
+    }
   }
 
   private upsert(service: Service): void {
@@ -57,7 +70,18 @@ export class ChromecastDevicesScanner implements DevicesScanner<ChromecastDevice
   }
 
   close(): void {
-    this.browser.stop();
-    this.bonjour.destroy();
+    for (const { bonjour, browser } of this.instances) {
+      browser.stop();
+      bonjour.destroy();
+    }
+    this.instances.length = 0;
   }
+}
+
+function localIPv4Addresses(): string[] {
+  return Object.values(networkInterfaces())
+    .flat()
+    .filter((i) => i?.family === 'IPv4' && !i.internal)
+    .map((i) => i?.address)
+    .filter((a): a is string => !!a);
 }
