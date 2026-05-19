@@ -22,6 +22,12 @@
       "type": "chrome",
       "webRoot": "${workspaceFolder}/src/renderer",
       "timeout": 60000,
+      "urlFilter": "http://localhost:*",
+      "resolveSourceMapLocations": [
+        "${workspaceFolder}/**",
+        "!**/node_modules/**",
+        "!**/devtools/**"
+      ],
       "presentation": {
         "hidden": true
       }
