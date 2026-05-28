@@ -11,6 +11,9 @@ export interface UpnpDevice extends Device {
   // MIME types the renderer claims to accept in its ConnectionManager Sink.
   // Drives container compatibility decisions in [[checkCompat]].
   acceptedVideoMimes: ReadonlySet<string>;
+  // Subset where the renderer advertised a codec wildcard (`*`) — for these,
+  // we trust the TV to handle any codec inside the container.
+  acceptedWildcardVideoMimes: ReadonlySet<string>;
 }
 
 interface DeviceRecord extends UpnpDevice {
@@ -51,12 +54,13 @@ export class UpnpDevicesScanner implements DevicesScanner<UpnpDevice> {
       return;
     }
     const previous = this.devices.get(id);
-    const acceptedVideoMimes =
-      previous?.acceptedVideoMimes ??
-      (await fetchProtocolInfo(desc.connectionManagerControlUrl)
-        .then((p) => p.videoMimes)
-        .catch(() => undefined));
-    if (!acceptedVideoMimes || acceptedVideoMimes.size === 0) {
+    const protocolInfo = previous
+      ? {
+          videoMimes: previous.acceptedVideoMimes,
+          wildcardVideoMimes: previous.acceptedWildcardVideoMimes,
+        }
+      : await fetchProtocolInfo(desc.connectionManagerControlUrl).catch(() => undefined);
+    if (!protocolInfo || protocolInfo.videoMimes.size === 0) {
       if (!previous) {
         this.rejectedIds.add(id);
       }
@@ -69,7 +73,8 @@ export class UpnpDevicesScanner implements DevicesScanner<UpnpDevice> {
       ip: new URL(location).hostname,
       avTransportControlUrl: desc.avTransportControlUrl,
       avTransportEventSubUrl: desc.avTransportEventSubUrl,
-      acceptedVideoMimes,
+      acceptedVideoMimes: protocolInfo.videoMimes,
+      acceptedWildcardVideoMimes: protocolInfo.wildcardVideoMimes,
       expiresAt: Date.now() + Math.min(cacheMaxAge * 1000, MAX_TTL_MS),
     };
     this.devices.set(id, record);

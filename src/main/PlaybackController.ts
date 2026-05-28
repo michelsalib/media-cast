@@ -106,6 +106,7 @@ export class PlaybackController {
         burnSubtitles,
         audioIndex,
         acceptedVideoMimes: device.acceptedVideoMimes,
+        acceptedWildcardVideoMimes: device.acceptedWildcardVideoMimes,
       });
 
       // Sidecar subtitles: extract to SMI (the format the DIDL builder defaults to —

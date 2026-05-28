@@ -2,9 +2,11 @@ import type { FFProbeData } from '../main/ffmpeg';
 import type { DeviceType } from './types';
 
 // Codecs old DLNA TVs reliably play without re-encoding. Conservative on purpose —
-// H.264 + AAC/AC3/MP3 is universal; HEVC is intentionally excluded until we find TVs
-// that need it. Container compat is now negotiated per-device via the renderer's
-// GetProtocolInfo Sink (see [[fetchProtocolInfo]]); these lists only gate codecs.
+// H.264 + AAC/AC3/MP3 is universal. These lists only apply when the renderer's
+// Sink entry for the chosen container is profile-locked (e.g. `DLNA.ORG_PN=AVC_*`).
+// When the Sink advertises the MIME with a `*` wildcard in the additional-info
+// field, the renderer is signalling "any codec inside this container" and we
+// bypass these gates entirely — see [[checkCompat]] and [[fetchProtocolInfo]].
 export const DIRECT_PLAY_VIDEO_CODECS = new Set(['h264']);
 export const DIRECT_PLAY_AUDIO_CODECS = new Set(['aac', 'ac3', 'eac3', 'mp3', 'mp2']);
 
@@ -53,11 +55,21 @@ export interface CompatInput {
   // MIMEs the renderer advertised in its ConnectionManager Sink. Empty/undefined
   // means we never got a usable answer — fall back to the static container list.
   acceptedVideoMimes?: ReadonlySet<string>;
+  // Subset of acceptedVideoMimes whose Sink entry had a `*` codec wildcard. When
+  // the chosen MIME is in this set, the codec allow-list is bypassed.
+  acceptedWildcardVideoMimes?: ReadonlySet<string>;
 }
 
 export function checkCompat(input: CompatInput): CompatReport {
-  const { videoFileName, probeData, deviceType, burnSubtitles, audioIndex, acceptedVideoMimes } =
-    input;
+  const {
+    videoFileName,
+    probeData,
+    deviceType,
+    burnSubtitles,
+    audioIndex,
+    acceptedVideoMimes,
+    acceptedWildcardVideoMimes,
+  } = input;
   const container = extractExt(videoFileName);
   const video = probeData.streams.find((s) => s.codec_type === 'video');
   const audio = probeData.streams.find((s) => s.codec_type === 'audio');
@@ -95,18 +107,25 @@ export function checkCompat(input: CompatInput): CompatReport {
     });
   }
 
-  if (!videoCodec || !DIRECT_PLAY_VIDEO_CODECS.has(videoCodec)) {
-    issues.push({
-      kind: 'videoCodec',
-      detail: `Video codec ${videoCodec ?? 'unknown'} (only h264 plays directly)`,
-    });
-  }
+  // If the renderer advertised the chosen MIME with a codec wildcard, trust it
+  // and skip the codec allow-list.
+  const codecWildcard =
+    videoMimeType !== undefined && (acceptedWildcardVideoMimes?.has(videoMimeType) ?? false);
 
-  if (!audioCodec || !DIRECT_PLAY_AUDIO_CODECS.has(audioCodec)) {
-    issues.push({
-      kind: 'audioCodec',
-      detail: `Audio codec ${audioCodec ?? 'unknown'} (only AAC/AC3/EAC3/MP3/MP2 play directly)`,
-    });
+  if (!codecWildcard) {
+    if (!videoCodec || !DIRECT_PLAY_VIDEO_CODECS.has(videoCodec)) {
+      issues.push({
+        kind: 'videoCodec',
+        detail: `Video codec ${videoCodec ?? 'unknown'} (only h264 plays directly)`,
+      });
+    }
+
+    if (!audioCodec || !DIRECT_PLAY_AUDIO_CODECS.has(audioCodec)) {
+      issues.push({
+        kind: 'audioCodec',
+        detail: `Audio codec ${audioCodec ?? 'unknown'} (only AAC/AC3/EAC3/MP3/MP2 play directly)`,
+      });
+    }
   }
 
   return {
