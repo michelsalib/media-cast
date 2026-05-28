@@ -15,8 +15,15 @@ rendererLog.transports.file.fileName = 'renderer.log';
 
 import icon from '../../build/icon.png?asset';
 import type { Device, DevicesScanner } from '../shared/types';
+import { resolveBundledBinary } from './binaryResolver';
 import { type ChromecastDevice, ChromecastDevicesScanner } from './chromecast/DevicesScanner';
-import { ffmpegPath, ffprobePath, getFfmpegVersion, probe, thumbnail } from './ffmpeg';
+import { configureBinaries, getBinaryPaths, getFfmpegVersion, probe, thumbnail } from './ffmpeg';
+
+configureBinaries({
+  ffmpegPath: resolveBundledBinary('ffmpeg') ?? 'ffmpeg',
+  ffprobePath: resolveBundledBinary('ffprobe') ?? 'ffprobe',
+});
+
 import {
   type InvokeHandlers,
   registerInvokeHandlers,
@@ -140,8 +147,7 @@ app.whenReady().then(() => {
     probe: (videoPath) => probe(videoPath),
     appInfo: async () => ({
       appVersion: app.getVersion(),
-      ffmpegPath,
-      ffprobePath,
+      ...getBinaryPaths(),
       ffmpegVersion: await getFfmpegVersion(),
     }),
     thumbnail: (videoPath, width, height) => thumbnail(videoPath, width, height),

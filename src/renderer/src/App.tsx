@@ -39,6 +39,26 @@ const darkTheme = createTheme({
     fontFamily:
       '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
   },
+  components: {
+    MuiCssBaseline: {
+      styleOverrides: {
+        '*::-webkit-scrollbar': {
+          width: 8,
+          height: 8,
+        },
+        '*::-webkit-scrollbar-track': {
+          background: 'transparent',
+        },
+        '*::-webkit-scrollbar-thumb': {
+          background: 'rgba(255,255,255,0.15)',
+          borderRadius: 4,
+        },
+        '*::-webkit-scrollbar-thumb:hover': {
+          background: 'rgba(255,255,255,0.25)',
+        },
+      },
+    },
+  },
 });
 
 function App(): React.JSX.Element {

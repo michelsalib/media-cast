@@ -79,9 +79,9 @@ export class MediaServer {
 
       const contentType =
         this.currentSubtitlesFormat === 'smi'
-          ? 'application/smil;charset=iso-8859-1'
+          ? 'application/smil;charset=utf-8'
           : this.currentSubtitlesFormat === 'srt'
-            ? 'application/x-subrip;charset=iso-8859-1'
+            ? 'application/x-subrip;charset=utf-8'
             : 'text/vtt;charset=utf-8';
 
       res.writeHead(200, {

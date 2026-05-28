@@ -1,25 +1,21 @@
 import { execFile, spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
-import path from 'node:path';
 import type { Readable } from 'node:stream';
 import { promisify } from 'node:util';
-import { app } from 'electron';
 
-// Binaries live under resources/bin/<platform>-<arch>/. In dev that's <projectRoot>/resources/bin/,
-// in packaged builds it's <process.resourcesPath>/bin/ (via electron-builder extraResources).
-// Falls back to whatever's on PATH if no bundled binary is found.
-function resolveBundledBinary(name: 'ffmpeg' | 'ffprobe'): string | undefined {
-  const binDir = app.isPackaged
-    ? path.join(process.resourcesPath, 'bin')
-    : path.join(app.getAppPath(), 'resources', 'bin');
-  const ext = process.platform === 'win32' ? '.exe' : '';
-  const fullPath = path.join(binDir, `${process.platform}-${process.arch}`, `${name}${ext}`);
-  return existsSync(fullPath) ? fullPath : undefined;
+// Paths to the ffmpeg/ffprobe binaries. Callers must invoke configureBinaries()
+// at startup (main process does this via [[resolveBundledBinary]]). Default to
+// PATH lookup so unit-test or script entry points still work before configuration.
+let ffmpegPath = 'ffmpeg';
+let ffprobePath = 'ffprobe';
+
+export function configureBinaries(paths: { ffmpegPath: string; ffprobePath: string }): void {
+  ffmpegPath = paths.ffmpegPath;
+  ffprobePath = paths.ffprobePath;
 }
 
-const ffmpegPath = resolveBundledBinary('ffmpeg') ?? 'ffmpeg';
-const ffprobePath = resolveBundledBinary('ffprobe') ?? 'ffprobe';
+export function getBinaryPaths(): { ffmpegPath: string; ffprobePath: string } {
+  return { ffmpegPath, ffprobePath };
+}
 
 async function runFfmpeg(args: string[]): Promise<Buffer> {
   const { stdout } = await promisify(execFile)(ffmpegPath, args, { encoding: 'buffer' });
@@ -56,34 +52,15 @@ export type SubtitleSource =
   | { source: 'external'; path: string }
   | { source: 'internal'; videoPath: string; trackIndex: number };
 
-/**
- * Pipe a subtitle stream out as bytes. Formats:
- *   - 'srt' / 'vtt' → ffmpeg decodes+remuxes (assumes input is UTF-8 — caller must
- *     handle non-UTF-8 inputs upstream).
- *   - 'raw' → codec-level bytes, no decoder pass. Use this when the original encoding
- *     matters (e.g. for charset sniffing before burn-in).
- */
-export function extractSubtitles(
-  source: SubtitleSource,
-  format: 'srt' | 'vtt' | 'raw'
-): Promise<Buffer> {
+export function extractSubtitles(source: SubtitleSource, format: 'srt' | 'vtt'): Promise<Buffer> {
   const inputPath = source.source === 'internal' ? source.videoPath : source.path;
   const args = ['-i', inputPath];
   if (source.source === 'internal') {
     args.push('-map', `0:s:${source.trackIndex}`);
   }
-  if (format === 'raw') {
-    // `-c:s copy -f data` pipes codec bytes without going through the subrip decoder
-    // (which would otherwise pre-translate to UTF-8 and mangle Latin-1).
-    args.push('-c:s', 'copy', '-f', 'data');
-  } else {
-    args.push('-f', format === 'vtt' ? 'webvtt' : 'srt');
-  }
-  args.push('pipe:1');
+  args.push('-f', format === 'vtt' ? 'webvtt' : 'srt', 'pipe:1');
   return runFfmpeg(args);
 }
-
-export { ffmpegPath, ffprobePath };
 
 export async function getFfmpegVersion(): Promise<string> {
   const { stdout } = await promisify(execFile)(ffmpegPath, ['-version']);
@@ -148,11 +125,6 @@ export interface TranscodeHandle {
 export async function transcodeToMpegTs(options: TranscodeOptions): Promise<TranscodeHandle> {
   const { videoPath, seekSeconds = 0, burnSubtitles, videoSize, audioTrackIndex = 0 } = options;
 
-  // libass (via the `subtitles` filter) reads the SRT stream assuming UTF-8. MKVs with
-  // mis-encoded Latin-1 subrip tracks render mojibake on accents — sniff the raw bytes
-  // once to pick the right `charenc` for the filter.
-  const subtitleCharenc = burnSubtitles ? await detectSubtitleCharenc(burnSubtitles) : undefined;
-
   const args: string[] = [];
   if (seekSeconds > 0) {
     // -copyts keeps the original input PTS through the pipeline so the subtitles filter
@@ -170,7 +142,7 @@ export async function transcodeToMpegTs(options: TranscodeOptions): Promise<Tran
     const adjustedSize = videoSize
       ? { width: videoSize.width, height: videoSize.height - cropBottom }
       : undefined;
-    filters.push(buildSubtitlesFilter(burnSubtitles, adjustedSize, subtitleCharenc));
+    filters.push(buildSubtitlesFilter(burnSubtitles, adjustedSize));
   }
   args.push('-vf', filters.join(','));
 
@@ -245,10 +217,9 @@ export async function transcodeToMpegTs(options: TranscodeOptions): Promise<Tran
   };
 }
 
-function buildSubtitlesFilter(
+export function buildSubtitlesFilter(
   spec: SubtitleSource,
-  videoSize: VideoSize | undefined,
-  charenc: string | undefined
+  videoSize: VideoSize | undefined
 ): string {
   const path = spec.source === 'external' ? spec.path : spec.videoPath;
   const parts = [`filename=${escapeFilterPath(path)}`];
@@ -258,46 +229,12 @@ function buildSubtitlesFilter(
   if (videoSize) {
     parts.push(`original_size=${videoSize.width}x${videoSize.height}`);
   }
-  if (charenc) {
-    // libass assumes UTF-8 otherwise; tell it the real input encoding so accents render.
-    parts.push(`charenc=${charenc}`);
-  }
   // SRT has no PlayResY, so libass scales FontSize against storage_height — i.e.
   // FontSize maps to ~pixels at the output resolution. Pick it as a fraction of
   // the frame so subs stay the same visual size across 480p / 720p / 1080p / 4K.
   const fontSize = videoSize ? Math.round(videoSize.height * 0.03) : 18;
   parts.push(`force_style=FontSize=${fontSize}`);
   return `subtitles=${parts.join(':')}`;
-}
-
-async function detectSubtitleCharenc(spec: SubtitleSource): Promise<string | undefined> {
-  // For external files, just read the bytes — going through ffmpeg's srt demuxer would
-  // also pre-decode and defeat the sniff.
-  const rawBytes =
-    spec.source === 'external' ? await readFile(spec.path) : await extractSubtitles(spec, 'raw');
-  // Valid UTF-8 → libass's default is right; don't pass charenc (also avoids forcing
-  // a re-decode when ASS/SSA tracks are involved).
-  if (isValidUtf8(rawBytes)) {
-    return undefined;
-  }
-  // Windows-1252 is a superset of Latin-1 and matches the iconv name libass accepts.
-  return 'windows-1252';
-}
-
-function isValidUtf8(buf: Buffer): boolean {
-  try {
-    new TextDecoder('utf-8', { fatal: true }).decode(stripBom(buf));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function stripBom(buf: Buffer): Buffer {
-  if (buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) {
-    return buf.subarray(3);
-  }
-  return buf;
 }
 
 function escapeFilterPath(p: string): string {

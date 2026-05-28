@@ -14,28 +14,10 @@ export async function extractSubtitles(
   }
 
   if (format === 'smi') {
-    return Buffer.from(srtToSmi(decodeText(raw)), 'latin1');
-  }
-
-  if (format === 'srt') {
-    // Old DLNA TVs (Samsung especially) reject UTF-8 SRT. Re-encode as Latin-1.
-    return Buffer.from(decodeText(raw), 'latin1');
+    return Buffer.from(srtToSmi(raw.toString('utf8')), 'utf8');
   }
 
   return raw;
-}
-
-// External SRTs are commonly saved as Windows-1252 / Latin-1 (especially in European
-// releases), not UTF-8. Blindly using .toString('utf8') turns 0xE9 ("é" in Latin-1)
-// into U+FFFD, which then re-encodes to "?" downstream. Try strict UTF-8 first; on
-// failure, fall back to Windows-1252 (a superset of Latin-1).
-function decodeText(buf: Buffer): string {
-  const stripped = stripBom(buf);
-  try {
-    return new TextDecoder('utf-8', { fatal: true }).decode(stripped);
-  } catch {
-    return new TextDecoder('windows-1252').decode(stripped);
-  }
 }
 
 async function readRaw(
@@ -56,8 +38,6 @@ async function readRaw(
 
   const lower = subtitlesPathOrIndex.toLowerCase();
 
-  // Passthrough when the on-disk format already matches the target — avoids ffmpeg's
-  // srt demuxer pre-decoding non-UTF-8 bytes (which would mangle Latin-1 accents).
   if (format === 'srt' && lower.endsWith('.srt')) {
     return readFile(subtitlesPathOrIndex);
   }
@@ -70,13 +50,6 @@ async function readRaw(
   }
 
   return undefined;
-}
-
-function stripBom(input: Buffer): Buffer {
-  if (input.length >= 3 && input[0] === 0xef && input[1] === 0xbb && input[2] === 0xbf) {
-    return input.subarray(3);
-  }
-  return input;
 }
 
 interface SrtCue {
