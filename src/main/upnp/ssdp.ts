@@ -11,42 +11,75 @@ export interface SsdpResponse {
   cacheMaxAge: number;
 }
 
+interface BoundSocket {
+  socket: dgram.Socket;
+  ready: boolean;
+}
+
 export class SsdpScanner {
-  private socket?: dgram.Socket;
   private callback?: (response: SsdpResponse) => void;
+  private started = false;
+  // One socket per local IPv4 interface, each bound to that interface's address with its
+  // own setMulticastInterface. A single shared socket does NOT work on multi-homed hosts:
+  // send() is async, so looping setMulticastInterface()+send() over interfaces lets the
+  // LAST interface win for every buffered datagram (typically a WSL/VPN virtual adapter),
+  // and the M-SEARCH never egresses the real LAN — the renderer is then never discovered.
+  private readonly sockets = new Map<string, BoundSocket>();
 
   start(callback: (response: SsdpResponse) => void): void {
     this.callback = callback;
-    this.socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
-    this.socket.on('message', (msg) => this.handleMessage(msg));
-    this.socket.on('error', () => {});
-    this.socket.bind(0, () => {
-      this.search();
-    });
+    this.started = true;
+    this.search();
   }
 
   search(): void {
-    const socket = this.socket;
-    if (!socket) {
+    if (!this.started) {
       return;
     }
+    this.syncSockets();
+    for (const bound of this.sockets.values()) {
+      if (bound.ready) {
+        this.sendSearch(bound.socket);
+      }
+    }
+  }
+
+  // Reconcile the socket set with the current interface list: open a socket for each new
+  // LAN address, close ones whose interface disappeared (VPN/adapter toggled). A newly
+  // bound socket fires its initial M-SEARCH from its bind callback so it isn't skipped
+  // before `ready` flips.
+  private syncSockets(): void {
+    const current = new Set(localIPv4Addresses());
+    for (const [addr, bound] of this.sockets) {
+      if (!current.has(addr)) {
+        bound.socket.close();
+        this.sockets.delete(addr);
+      }
+    }
+    for (const addr of current) {
+      if (this.sockets.has(addr)) {
+        continue;
+      }
+      const socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
+      const bound: BoundSocket = { socket, ready: false };
+      socket.on('message', (msg) => this.handleMessage(msg));
+      socket.on('error', () => {});
+      socket.bind(0, addr, () => {
+        try {
+          socket.setMulticastInterface(addr);
+        } catch {}
+        bound.ready = true;
+        this.sendSearch(socket);
+      });
+      this.sockets.set(addr, bound);
+    }
+  }
+
+  private sendSearch(socket: dgram.Socket): void {
     const msg = Buffer.from(
       `M-SEARCH * HTTP/1.1\r\nHOST: ${SSDP_HOST}:${SSDP_PORT}\r\nMAN: "ssdp:discover"\r\nMX: 3\r\nST: ${TARGET}\r\n\r\n`
     );
-    // Without setMulticastInterface, the OS sends M-SEARCH out the default-route NIC only —
-    // which is the VPN tunnel on multi-homed hosts. Fan out across every LAN interface so
-    // the renderer on the actual LAN gets the query.
-    const addrs = localIPv4Addresses();
-    if (addrs.length === 0) {
-      socket.send(msg, SSDP_PORT, SSDP_HOST);
-      return;
-    }
-    for (const addr of addrs) {
-      try {
-        socket.setMulticastInterface(addr);
-        socket.send(msg, SSDP_PORT, SSDP_HOST);
-      } catch {}
-    }
+    socket.send(msg, SSDP_PORT, SSDP_HOST, () => {});
   }
 
   private handleMessage(msg: Buffer): void {
@@ -80,8 +113,11 @@ export class SsdpScanner {
   }
 
   close(): void {
-    this.socket?.close();
-    this.socket = undefined;
+    this.started = false;
+    for (const bound of this.sockets.values()) {
+      bound.socket.close();
+    }
+    this.sockets.clear();
   }
 }
 
