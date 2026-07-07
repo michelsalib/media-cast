@@ -8,5 +8,11 @@
     <true/>
     <key>com.apple.security.cs.allow-dyld-environment-variables</key>
     <true/>
+    <!-- Ad-hoc signing (no Apple Developer cert) + hardened runtime enforces
+         library validation, which rejects the pre-signed Electron Framework
+         because it carries a different Team ID than the main executable.
+         Disabling library validation lets the framework load. See issue #2. -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
   </dict>
 </plist>
