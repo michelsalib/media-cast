@@ -32,10 +32,20 @@ mac:
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
-    - NSCameraUsageDescription: Application requests access to the device's camera.
-    - NSMicrophoneUsageDescription: Application requests access to the device's microphone.
-    - NSDocumentsFolderUsageDescription: Application requests access to the user's Documents folder.
-    - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
+    NSCameraUsageDescription: Application requests access to the device's camera.
+    NSMicrophoneUsageDescription: Application requests access to the device's microphone.
+    NSDocumentsFolderUsageDescription: Application requests access to the user's Documents folder.
+    NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
+    # macOS 15 (Sequoia) gates all local-network access behind a privacy prompt.
+    # Without this key the prompt has no rationale text and discovery silently fails.
+    NSLocalNetworkUsageDescription: Media Cast discovers Chromecast and DLNA devices on your local network so it can stream video to them.
+    # Bonjour browsing (Chromecast, _googlecast._tcp) returns NOTHING unless the
+    # service types are declared here — even after the local-network prompt is granted.
+    # SSDP/UPnP is raw multicast (not Bonjour) so it needs no entry, only the prompt above.
+    # NOTE: the iOS com.apple.developer.networking.multicast entitlement does NOT exist on
+    # macOS and must not be added — on macOS the local-network TCC prompt is the only gate.
+    NSBonjourServices:
+      - _googlecast._tcp
   notarize: false
 dmg:
   artifactName: ${name}-${version}.${ext}
