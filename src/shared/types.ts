@@ -51,3 +51,11 @@ export interface Renderer {
   getStatus(): Promise<void>;
   onStatus(callback: (status: PlayerStatus) => void): void;
 }
+
+// Main → renderer pushes. Hand-written: unlike `MainApi` there is no
+// implementation object to derive this from.
+export interface MainEvents {
+  status: PlayerStatus;
+  scan: Device[];
+  updateReady: null;
+}

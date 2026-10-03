@@ -1,5 +1,6 @@
 import { MenuItem, Select } from '@mui/material';
 import { useEffect, useState } from 'react';
+import { api, pathFor } from '../ipc';
 import type { AudioSelection } from './AudioSelection';
 
 type Props = {
@@ -21,7 +22,7 @@ export default function AudioSelector({ videoFile, onChange }: Props): React.JSX
         return;
       }
 
-      const probeData = await window.api.probe(videoFile);
+      const probeData = await api.probe(pathFor(videoFile));
       const audio = probeData.streams
         .filter((s) => s.codec_type === 'audio')
         .map(

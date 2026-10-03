@@ -38,6 +38,8 @@ No TV-side setup. No media library to configure. No account. Works with **Chrome
 | macOS | `.dmg` (universal — Intel + Apple Silicon) |
 | Linux | `.AppImage` |
 
+Requires Windows 10/11 (64-bit), macOS 13 (Ventura) or later, or Linux x64.
+
 All builds are on the **[Releases page](https://github.com/michelsalib/media-cast/releases/latest)** — the badge above always points to the latest version. Auto-updates are built in, so once installed you'll be notified of new versions.
 
 ## How it works
@@ -49,20 +51,20 @@ All builds are on the **[Releases page](https://github.com/michelsalib/media-cas
 
 ## Building from source
 
-Requires Node.js 24+.
+Requires Node.js 24+ and [bun](https://bun.sh) (package manager and script runner; Electron itself still runs on Node).
 
 ```bash
-npm install
-npm run prepare:binaries   # fetch static ffmpeg/ffprobe into resources/bin/
-npm run dev                # electron-vite dev with HMR
+bun install
+bun run prepare:binaries   # fetch static ffmpeg/ffprobe into resources/bin/
+bun run dev                # electron-vite dev with HMR
 ```
 
 Produce installers:
 
 ```bash
-npm run build:win     # Windows
-npm run build:mac     # macOS (universal)
-npm run build:linux   # Linux
+bun run build:win     # Windows
+bun run build:mac     # macOS (universal)
+bun run build:linux   # Linux
 ```
 
-**Tooling:** [electron-vite](https://electron-vite.org/) · [Biome](https://biomejs.dev/) (lint + format) · [tsgo](https://github.com/microsoft/typescript-go) (typecheck). See [CLAUDE.md](CLAUDE.md) for an architecture overview.
+**Tooling:** [electron-vite](https://electron-vite.org/) · [Biome](https://biomejs.dev/) (lint + format) · TypeScript 7 native `tsc` (typecheck). See [CLAUDE.md](CLAUDE.md) for an architecture overview.

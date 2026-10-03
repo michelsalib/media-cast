@@ -2,6 +2,7 @@ import { MenuItem, Select } from '@mui/material';
 import { useEffect, useState } from 'react';
 import { isBitmapSubtitleCodec } from '../../../shared/subtitles';
 import type { DeviceType } from '../../../shared/types';
+import { api, pathFor } from '../ipc';
 import { NO_SUBTITLES, type SubtitlesSelection } from './SubtitlesSelection';
 
 type Props = {
@@ -44,7 +45,7 @@ export default function SubtitlesSelector({
       const newChoices: SubtitlesSelection[] = [NO_SUBTITLES];
 
       if (videoFile) {
-        const probeData = await window.api.probe(videoFile);
+        const probeData = await api.probe(pathFor(videoFile));
         const internal = probeData.streams
           .filter((s) => s.codec_type === 'subtitle')
           .map(

@@ -17,20 +17,14 @@ import icon from '../../build/icon.png?asset';
 import type { Device, DevicesScanner } from '../shared/types';
 import { resolveBundledBinary } from './binaryResolver';
 import { type ChromecastDevice, ChromecastDevicesScanner } from './chromecast/DevicesScanner';
-import { configureBinaries, getBinaryPaths, getFfmpegVersion, probe, thumbnail } from './ffmpeg';
+import { configureBinaries } from './ffmpeg';
 
 configureBinaries({
   ffmpegPath: resolveBundledBinary('ffmpeg') ?? 'ffmpeg',
   ffprobePath: resolveBundledBinary('ffprobe') ?? 'ffprobe',
 });
 
-import {
-  type InvokeHandlers,
-  registerInvokeHandlers,
-  registerSendHandlers,
-  type SendHandlers,
-  sendEvent,
-} from './ipc';
+import { createMainApi, registerMainApi, sendEvent } from './api';
 import { MediaServer } from './MediaServer';
 import { PlaybackController } from './PlaybackController';
 import { type UpnpDevice, UpnpDevicesScanner } from './upnp/DevicesScanner';
@@ -62,7 +56,7 @@ function createWindow(): BrowserWindow {
     },
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false,
+      sandbox: true,
       devTools: is.dev,
     },
   });
@@ -143,40 +137,7 @@ app.whenReady().then(() => {
 
   const scanners: DevicesScanner[] = [chromecastScanner, upnpScanner];
 
-  const invokeHandlers: InvokeHandlers = {
-    probe: (videoPath) => probe(videoPath),
-    appInfo: async () => ({
-      appVersion: app.getVersion(),
-      ...getBinaryPaths(),
-      ffmpegVersion: await getFfmpegVersion(),
-    }),
-    thumbnail: (videoPath, width, height) => thumbnail(videoPath, width, height),
-    connect: (deviceId) => controller.connect(deviceId),
-    disconnect: () => controller.disconnect(),
-    load: (videoPath, subtitlesPathOrIndex, audioIndex, burnSubtitles) =>
-      controller.load(videoPath, subtitlesPathOrIndex, audioIndex, burnSubtitles),
-  };
-
-  const sendHandlers: SendHandlers = {
-    play: () => {
-      void controller.play();
-    },
-    pause: () => {
-      void controller.pause();
-    },
-    seek: (time) => {
-      void controller.seek(time);
-    },
-    refresh: () => {
-      for (const s of scanners) s.refresh();
-    },
-    quitAndInstall: () => {
-      autoUpdater.quitAndInstall();
-    },
-  };
-
-  registerInvokeHandlers(invokeHandlers);
-  registerSendHandlers(sendHandlers);
+  registerMainApi(createMainApi({ controller, scanners, updater: autoUpdater }));
 
   mainWindow.on('closed', async () => {
     await controller.close();

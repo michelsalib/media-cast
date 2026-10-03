@@ -15,6 +15,7 @@ import {
 import format from 'format-duration';
 import { useEffect, useRef, useState } from 'react';
 import type { Device, PlayerStatus } from '../../../shared/types';
+import { api, onEvent } from '../ipc';
 import PlayPause from './PlayPauseSeek';
 
 const marquee = keyframes`
@@ -41,7 +42,7 @@ export default function Player({ device, onDisconnect }: Props): React.JSX.Eleme
   const titleRef = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
-    return window.api.onStatus(setStatus);
+    return onEvent('status', setStatus);
   }, []);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-run on device change to clear stale status
@@ -59,11 +60,11 @@ export default function Player({ device, onDisconnect }: Props): React.JSX.Eleme
   }
 
   function seek(_evt: Event, value: number): void {
-    window.api.seek(value);
+    void api.seek(value);
   }
 
   function disconnect(): void {
-    window.api.disconnect();
+    void api.disconnect();
     onDisconnect?.();
   }
 

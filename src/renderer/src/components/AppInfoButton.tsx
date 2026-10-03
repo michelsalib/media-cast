@@ -2,6 +2,7 @@ import { InfoOutlined } from '@mui/icons-material';
 import { Box, IconButton, Popover, Stack, Typography } from '@mui/material';
 import { useRef, useState } from 'react';
 import type { AppInfo } from '../../../shared/types';
+import { api } from '../ipc';
 
 export default function AppInfoButton(): React.JSX.Element {
   const anchorRef = useRef<HTMLButtonElement>(null);
@@ -13,7 +14,7 @@ export default function AppInfoButton(): React.JSX.Element {
     setOpen(true);
     if (!info) {
       try {
-        setInfo(await window.api.appInfo());
+        setInfo(await api.appInfo());
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       }

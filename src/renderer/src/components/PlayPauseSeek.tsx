@@ -7,6 +7,7 @@ import {
 import { Box, Button } from '@mui/material';
 import { useEffect, useState } from 'react';
 import type { PlayerStatus } from '../../../shared/types';
+import { api } from '../ipc';
 
 type BUTTON_STATE = 'PLAY' | 'PAUSE' | 'UNKNOWN';
 type Props = {
@@ -30,11 +31,11 @@ export default function PlayPauseSeek({ status }: Props): React.JSX.Element {
   }, [status]);
 
   function play(): void {
-    window.api.play();
+    void api.play();
   }
 
   function pause(): void {
-    window.api.pause();
+    void api.pause();
   }
 
   function seekRewind(): void {
@@ -42,7 +43,7 @@ export default function PlayPauseSeek({ status }: Props): React.JSX.Element {
       return;
     }
 
-    window.api.seek(status.currentTime - 10);
+    void api.seek(status.currentTime - 10);
   }
 
   function seekForward(): void {
@@ -50,7 +51,7 @@ export default function PlayPauseSeek({ status }: Props): React.JSX.Element {
       return;
     }
 
-    window.api.seek(status.currentTime + 10);
+    void api.seek(status.currentTime + 10);
   }
 
   return (

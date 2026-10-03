@@ -14,6 +14,7 @@ import {
 } from '@mui/material';
 import { useEffect, useState } from 'react';
 import type { Device } from '../../../shared/types';
+import { api, onEvent } from '../ipc';
 
 type Props = {
   onChange?: (state: ConnectorState, device: Device | null) => void;
@@ -44,14 +45,14 @@ export function Connector({ onChange }: Props): React.JSX.Element {
   const theme = useTheme();
 
   function refresh(): void {
-    window.api.refresh();
+    void api.refresh();
     setScanning(true);
     setTimeout(() => setScanning(false), 800);
   }
 
   useEffect(() => {
-    window.api.refresh();
-    return window.api.onScan(setDevices);
+    void api.refresh();
+    return onEvent('scan', setDevices);
   }, []);
 
   useEffect(() => {
@@ -67,7 +68,7 @@ export function Connector({ onChange }: Props): React.JSX.Element {
     try {
       setConnectedId(id);
       setState('LOADING');
-      await window.api.connect(id);
+      await api.connect(id);
       setState('CONNECTED');
     } catch {
       setConnectedId(null);

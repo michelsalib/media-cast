@@ -6,15 +6,17 @@ Electron + React + TS app that streams local video to Chromecast and UPnP/DLNA, 
 
 ## Commands
 
+Package manager and script runner is **bun** (`bun install`, lockfile `bun.lock`). Electron's own tooling (electron-vite, electron-builder) still executes on Node (`.nvmrc`); bun only drives the scripts. Dependency postinstalls are blocked by bun except its default-trusted list (electron and sharp are on it) — do not add `trustedDependencies`, it *replaces* that list.
+
 ```bash
-npm run dev               # electron-vite dev (HMR for main/preload/renderer)
-npm run typecheck         # both projects; uses tsgo (@typescript/native-preview), NOT tsc
-npm run check             # biome lint + format --write
-npm run prepare:binaries  # fetch static ffmpeg/ffprobe into resources/bin/<platform>-<arch>/
-npm run build:{win,mac,linux}  # runs typecheck → electron-vite build → electron-builder
+bun run dev               # electron-vite dev (HMR for main/preload/renderer)
+bun run typecheck         # both projects; TypeScript 7 native `tsc`
+bun run check             # biome lint + format --write
+bun run prepare:binaries  # fetch static ffmpeg/ffprobe into resources/bin/<platform>-<arch>/
+bun run build:{win,mac,linux}  # runs typecheck → electron-vite build → electron-builder
 ```
 
-No tests. `build` aborts on typecheck failure. Biome (not ESLint/Prettier) — see `biome.json`. TS root is references-only; edit `tsconfig.node.json` (main+preload+scripts) or `tsconfig.web.json` (renderer).
+No tests. `build` aborts on typecheck failure. Biome (not ESLint/Prettier) — see `biome.json`. TS root is references-only; edit `tsconfig.node.json` (main+preload+scripts) or `tsconfig.web.json` (renderer). Electron 44+: macOS 13+ and 64-bit Windows only.
 
 ## ffmpeg/ffprobe
 
@@ -24,15 +26,15 @@ Run `prepare:binaries` once before `dev` or any `build:*`. `resolveBundledBinary
 
 Three processes communicating only via the IPC bridge in [src/preload/index.ts](src/preload/index.ts):
 
-- **main** ([src/main/index.ts](src/main/index.ts)) — discovery, HTTP media server, ffmpeg, playback `Renderer` instances.
-- **preload** — wraps every IPC channel as `window.api.<method>`; type augmented onto `Window` by [src/preload/index.d.ts](src/preload/index.d.ts) (picked up by `tsconfig.web.json`).
+- **main** ([src/main/index.ts](src/main/index.ts)) — discovery, HTTP media server, ffmpeg, playback `Renderer` instances. The `BrowserWindow` runs with `sandbox: true`, so the preload may only `require('electron')` and must stay CommonJS (no `"type": "module"` in `package.json`).
+- **preload** — a generic bridge exposed as `window.ipc` with exactly three members: `invoke(channel, ...args)`, `on(channel, cb) → unsubscribe`, `pathFor(file)`. No per-method code lives here; typing is done in the renderer.
 - **renderer** ([src/renderer/src/](src/renderer/src/)) — React 19 + MUI 9 (Emotion `sx`, no Tailwind, no router, no store). Alias `@renderer` → `src/renderer/src`.
 
 Shared types are in [src/shared/types.ts](src/shared/types.ts). The `Renderer` interface there (playback abstraction) is *not* the Electron renderer process — same word, different meaning.
 
 ### Playback: `Renderer` interface
 
-Main holds at most one active `Renderer`. On `connect` it `.close()`s any prior one then instantiates the new one and wires `onStatus` → `status` IPC channel.
+Main holds at most one active `Renderer`. On `connect` it `.close()`s any prior one then instantiates the new one and wires `onStatus` → `status` push.
 
 - **[CastPlayer](src/main/chromecast/Player.ts)** (`castv2-client`) — direct stream + sidecar WebVTT subs.
 - **[UpnpPlayer](src/main/upnp/Player.ts)** — hand-rolled DLNA: SOAP control + GENA event subscription. Transport plumbing in `src/main/upnp/` (`soap.ts`, `eventing.ts`, `ssdp.ts`, `description.ts`, `xml.ts`). On `close`, `Stop` alone leaves the URI loaded on most renderers — also `SetAVTransportURI` with empty `CurrentURI` to unload.
@@ -50,7 +52,6 @@ Each session uses a fresh UUID URL prefix so old TVs don't cache prior content. 
 
 - Direct (Chromecast) — `send` package, byte-range capable.
 - Transcoded (UPnP) — pipes `ffmpeg` MPEG-TS output. `BurnSubtitles` option burns subs into the video stream (most DLNA TVs don't honor sidecar subs).
-  - **Keep the `coalesce()` Transform between ffmpeg and the response.** ffmpeg's pipe output arrives in tiny pieces (often one 188-byte TS packet) and HTTP sockets run with Nagle off, so without it the TV receives hundreds of tiny TCP segments. LG TVs then decode partial frames: garbage along the bottom of the picture that clears at each keyframe. The bytes are fine — the identical stream sent in large writes plays clean. Symptoms that look like an encoder/decoder bug on transcoded streams only (never on direct play or a pre-encoded file) → suspect delivery first.
 
 [pickLocalIpFor](src/main/network.ts) selects the LAN interface on the target's subnet — required for correct URLs on multi-homed hosts (VPN, WSL, virtual adapters).
 
@@ -67,26 +68,22 @@ Each session uses a fresh UUID URL prefix so old TVs don't cache prior content. 
 State is flat — `useState` only, ownership by component:
 
 - [App.tsx](src/renderer/src/App.tsx) — `connectedDevice`; toggles `<Connector>` vs `<Player>`. Theme defined inline here.
-- [Connector.tsx](src/renderer/src/components/Connector.tsx) — subscribes `onScan` and triggers an initial `refresh` on mount; owns `DISCONNECTED → LOADING → CONNECTED`.
-- [Player.tsx](src/renderer/src/components/Player.tsx) — subscribes `onStatus`. The 1s ticker that drives between player-side status events lives in [PlaybackController](src/main/PlaybackController.ts), not the renderer.
-- [Dropper.tsx](src/renderer/src/components/Dropper.tsx) — drag-and-drop ingestion. Discriminator is filename suffix: `.mp4`/`.mkv` → video, anything else → subs. Thumbnail regenerated per video via `window.api.thumbnail`.
+- [Connector.tsx](src/renderer/src/components/Connector.tsx) — subscribes `onEvent('scan')` and triggers an initial `refresh` on mount; owns `DISCONNECTED → LOADING → CONNECTED`.
+- [Player.tsx](src/renderer/src/components/Player.tsx) — subscribes `onEvent('status')`. The 1s ticker that drives between player-side status events lives in [PlaybackController](src/main/PlaybackController.ts), not the renderer.
+- [Dropper.tsx](src/renderer/src/components/Dropper.tsx) — drag-and-drop ingestion. Discriminator is filename suffix: `.mp4`/`.mkv` → video, anything else → subs. Thumbnail regenerated per video via `api.thumbnail`.
 
-[SubtitlesSelection.ts](src/renderer/src/components/SubtitlesSelection.ts) is a 3-arm union (`internal` / `external` / `no subtitles`); [SubtitlesSelector.tsx](src/renderer/src/components/SubtitlesSelector.tsx) builds choices from `window.api.probe` + the optional sidecar, auto-selects `external > internal > none`. Dropper maps it to the `load` IPC's `subtitlesPathOrIndex` (string | number | undefined) — that's what main keys on for burn-in vs sidecar.
+[SubtitlesSelection.ts](src/renderer/src/components/SubtitlesSelection.ts) is a 3-arm union (`internal` / `external` / `no subtitles`); [SubtitlesSelector.tsx](src/renderer/src/components/SubtitlesSelector.tsx) builds choices from `api.probe` + the optional sidecar, auto-selects `external > internal > none`. Dropper maps it to the `load` call's `subtitlesPathOrIndex` (string | number | undefined) — that's what main keys on for burn-in vs sidecar.
 
-Cross-process type imports (e.g. `import type { FFProbeData } from '../../../main/ffmpeg'`) are intentional but **must stay `import type`** — main-process runtime code would break the renderer bundle. `File` objects can't cross IPC; preload calls `webUtils.getPathForFile()` to extract OS paths before sending.
+Cross-process type imports (e.g. `import type { FFProbeData } from '../../../main/ffmpeg'`, `import type { MainApi } from '../../main/api'`) are intentional but **must stay `import type`** — main-process runtime code would break the renderer bundle. `File` objects can't cross IPC; the renderer calls `pathFor(file)` (preload's `webUtils.getPathForFile`) and sends the OS path.
 
-## IPC channels
+## IPC
 
-Single contract in [src/shared/api.ts](src/shared/api.ts) — three interfaces `InvokeChannels`, `SendChannels`, `EventChannels` plus matching `*_CHANNELS` const arrays. Drift between main and preload becomes a compile error.
+There is no channel list. The contract is the **handler map** returned by `createMainApi` in [src/main/api.ts](src/main/api.ts); its type `MainApi` is `ReturnType<typeof createMainApi>`.
 
-- `InvokeChannels` (renderer → main, awaited): `probe`, `appInfo`, `thumbnail`, `connect`, `disconnect`, `load`
-- `SendChannels` (renderer → main, fire-and-forget): `play`, `pause`, `seek`, `refresh`
-- `EventChannels` (main → renderer broadcasts): `status`, `scan`
+- **main** — `registerMainApi(api)` loops `ipcMain.handle` over the map, once, inside `whenReady`. Main → renderer pushes go through `sendEvent(window, channel, payload)`, typed by the small hand-written `MainEvents` interface in [src/shared/types.ts](src/shared/types.ts) (`status`, `scan`, `updateReady`).
+- **preload** — generic `window.ipc` bridge (see Architecture). Never add per-method code here.
+- **renderer** — [src/renderer/src/ipc.ts](src/renderer/src/ipc.ts) exports `api` (a `Proxy` typed as `MainApi` with returns promisified and `Buffer` → `Uint8Array`), `onEvent(channel, cb) → unsubscribe`, and `pathFor(file)`. Fire-and-forget calls are written `void api.play()`.
 
-[src/preload/index.ts](src/preload/index.ts) auto-derives bindings from the contract via `makeInvoke`/`makeSend`/`makeOn`, then overrides `load`/`probe`/`thumbnail` with `File`-accepting wrappers that call `webUtils.getPathForFile()` before crossing IPC.
+Adding a method: add a key to the object in `createMainApi`. The renderer's `api.<key>` is typed immediately; nothing else to touch. Adding a push: add a key to `MainEvents`, then `sendEvent` / `onEvent` are typed.
 
-[src/main/index.ts](src/main/index.ts) registers handlers through `registerInvokeHandlers`/`registerSendHandlers` from [src/main/ipc.ts](src/main/ipc.ts) — the handler maps are typed against `InvokeHandlers`/`SendHandlers`, so a missing or mis-typed handler fails to compile. Broadcasts use `sendEvent(window, channel, payload)` for typed pushes.
-
-Most playback logic lives in [src/main/PlaybackController.ts](src/main/PlaybackController.ts) — `index.ts` is wiring. The controller owns the active `Renderer`, the 1s status tick, and the device-type branching in `load`.
-
-Adding a channel: add to the contract → handler in main and preload wrapper become compile errors until implemented. Renderer gets the new method typed on `window.api` automatically.
+Rules: params and returns must survive structured clone (plain objects, strings, numbers, `Uint8Array`); errors cross as `message` only; never `await api`, spread it or log it (every property read is a call).

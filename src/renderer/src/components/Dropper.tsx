@@ -34,6 +34,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { FFProbeData } from '../../../main/ffmpeg';
 import { type CompatReport, checkCompat } from '../../../shared/compat';
 import type { Device } from '../../../shared/types';
+import { api, pathFor } from '../ipc';
 import type { AudioSelection } from './AudioSelection';
 import AudioSelector from './AudioSelector';
 import { NO_SUBTITLES, type SubtitlesSelection } from './SubtitlesSelection';
@@ -63,7 +64,7 @@ export default function Dropper(props: Props): React.JSX.Element {
   const [subs, setSubs] = useState<File | undefined>();
   const [subtitlesSelection, setSubtitlesSelection] = useState<SubtitlesSelection>(NO_SUBTITLES);
   const [audioSelection, setAudioSelection] = useState<AudioSelection | undefined>();
-  const [thumbnail, setThumbnail] = useState<Buffer | undefined>(undefined);
+  const [thumbnail, setThumbnail] = useState<Uint8Array | undefined>(undefined);
   const [probeData, setProbeData] = useState<FFProbeData | undefined>(undefined);
   const [burnSubtitles, setBurnSubtitles] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
@@ -133,14 +134,13 @@ export default function Dropper(props: Props): React.JSX.Element {
     if (!video) {
       return;
     }
-    const audioArg = audioSelection?.index;
-    if (subtitlesSelection.type === 'external') {
-      window.api.load(video, subtitlesSelection.file, audioArg, effectiveBurn);
-    } else if (subtitlesSelection.type === 'internal') {
-      window.api.load(video, subtitlesSelection.index, audioArg, effectiveBurn);
-    } else {
-      window.api.load(video, undefined, audioArg, effectiveBurn);
-    }
+    const subsArg =
+      subtitlesSelection.type === 'external'
+        ? pathFor(subtitlesSelection.file)
+        : subtitlesSelection.type === 'internal'
+          ? subtitlesSelection.index
+          : undefined;
+    void api.load(pathFor(video), subsArg, audioSelection?.index, effectiveBurn);
   }
 
   useEffect(() => {
@@ -149,7 +149,7 @@ export default function Dropper(props: Props): React.JSX.Element {
         return;
       }
 
-      const thumbnail = await window.api.thumbnail(video);
+      const thumbnail = await api.thumbnail(pathFor(video));
 
       setThumbnail(thumbnail);
     }
@@ -163,7 +163,7 @@ export default function Dropper(props: Props): React.JSX.Element {
       return;
     }
     let cancelled = false;
-    window.api.probe(video).then((data) => {
+    api.probe(pathFor(video)).then((data) => {
       if (!cancelled) setProbeData(data);
     });
     return () => {

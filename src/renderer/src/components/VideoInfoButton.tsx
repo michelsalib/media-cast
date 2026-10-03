@@ -12,6 +12,7 @@ import {
 } from '@mui/material';
 import { useRef, useState } from 'react';
 import type { FFProbeData } from '../../../main/ffmpeg';
+import { api, pathFor } from '../ipc';
 
 interface Props {
   video: File;
@@ -39,7 +40,7 @@ export default function VideoInfoButton({ video, sx }: Props): React.JSX.Element
     setOpen(true);
     if (!info && !error) {
       try {
-        setInfo(await window.api.probe(video));
+        setInfo(await api.probe(pathFor(video)));
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       }
