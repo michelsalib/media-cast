@@ -1,10 +1,11 @@
 import { basename } from 'node:path';
 import type { BrowserWindow } from 'electron';
 import { checkCompat } from '../shared/compat';
+import { isBitmapSubtitleCodec } from '../shared/subtitles';
 import type { Renderer } from '../shared/types';
 import type { ChromecastDevice } from './chromecast/DevicesScanner';
 import { CastPlayer } from './chromecast/Player';
-import { probe } from './ffmpeg';
+import { isHdrTransfer, probe, probeSubtitleCanvas, type SubtitleSource } from './ffmpeg';
 import { sendEvent } from './ipc';
 import type { MediaServer } from './MediaServer';
 import { extractSubtitles } from './subtitleExtractor';
@@ -92,12 +93,23 @@ export class PlaybackController {
         : undefined;
 
     if (device.type === 'upnp') {
-      const burnSubtitlesArg =
-        burnSubtitles && subtitlesPathOrIndex !== undefined
-          ? typeof subtitlesPathOrIndex === 'number'
-            ? ({ source: 'internal', videoPath, trackIndex: subtitlesPathOrIndex } as const)
-            : ({ source: 'external', path: subtitlesPathOrIndex } as const)
+      let burnSubtitlesArg: SubtitleSource | undefined;
+      if (burnSubtitles && typeof subtitlesPathOrIndex === 'number') {
+        const subtitleStream = probeData.streams.filter((s) => s.codec_type === 'subtitle')[
+          subtitlesPathOrIndex
+        ];
+        const bitmap = isBitmapSubtitleCodec(subtitleStream?.codec_name)
+          ? { canvas: await probeSubtitleCanvas(videoPath, subtitlesPathOrIndex) }
           : undefined;
+        burnSubtitlesArg = {
+          source: 'internal',
+          videoPath,
+          trackIndex: subtitlesPathOrIndex,
+          bitmap,
+        };
+      } else if (burnSubtitles && typeof subtitlesPathOrIndex === 'string') {
+        burnSubtitlesArg = { source: 'external', path: subtitlesPathOrIndex };
+      }
 
       const compat = checkCompat({
         videoFileName: videoPath,
@@ -146,6 +158,7 @@ export class PlaybackController {
         burnSubtitles: burnSubtitlesArg,
         videoSize,
         audioTrackIndex: audioIndex,
+        hdr: isHdrTransfer(videoStream?.color_transfer),
       });
       await this.renderer.loadVideo({
         title,

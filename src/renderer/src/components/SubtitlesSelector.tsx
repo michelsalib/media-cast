@@ -1,12 +1,21 @@
 import { MenuItem, Select } from '@mui/material';
 import { useEffect, useState } from 'react';
+import { isBitmapSubtitleCodec } from '../../../shared/subtitles';
+import type { DeviceType } from '../../../shared/types';
 import { NO_SUBTITLES, type SubtitlesSelection } from './SubtitlesSelection';
 
 type Props = {
   videoFile?: File;
   subFile?: File;
+  deviceType?: DeviceType;
   onChange?: (selection: SubtitlesSelection) => void;
 };
+
+// Chromecast always direct-plays with sidecar WebVTT, so image-based tracks have no
+// path to the screen there.
+function isSupported(c: SubtitlesSelection, deviceType: DeviceType | undefined): boolean {
+  return !(c.type === 'internal' && c.bitmap && deviceType === 'chromecast');
+}
 
 function choiceKey(c: SubtitlesSelection): string {
   switch (c.type) {
@@ -23,6 +32,7 @@ export default function SubtitlesSelector({
   onChange,
   subFile,
   videoFile,
+  deviceType,
 }: Props): React.JSX.Element {
   const [choices, setChoices] = useState<SubtitlesSelection[]>([NO_SUBTITLES]);
   const [choice, setChoice] = useState(NO_SUBTITLES);
@@ -42,6 +52,7 @@ export default function SubtitlesSelector({
               type: 'internal',
               index: i,
               name: s.tags.title || s.tags.language || 'Unknown video subtitles',
+              bitmap: isBitmapSubtitleCodec(s.codec_name),
             })
           );
         newChoices.push(...internal);
@@ -57,7 +68,7 @@ export default function SubtitlesSelector({
 
       const autoSelect =
         newChoices.find((c) => c.type === 'external') ??
-        newChoices.find((c) => c.type === 'internal') ??
+        newChoices.find((c) => c.type === 'internal' && isSupported(c, deviceType)) ??
         NO_SUBTITLES;
 
       setChoices(newChoices);
@@ -69,7 +80,7 @@ export default function SubtitlesSelector({
     return () => {
       cancelled = true;
     };
-  }, [videoFile, subFile]);
+  }, [videoFile, subFile, deviceType]);
 
   useEffect(() => {
     onChange?.(choice);
@@ -85,8 +96,8 @@ export default function SubtitlesSelector({
       }}
     >
       {choices.map((c, i) => (
-        <MenuItem key={choiceKey(c)} value={i}>
-          {c.name}
+        <MenuItem key={choiceKey(c)} value={i} disabled={!isSupported(c, deviceType)}>
+          {isSupported(c, deviceType) ? c.name : `${c.name} (image subtitles, not supported)`}
         </MenuItem>
       ))}
     </Select>

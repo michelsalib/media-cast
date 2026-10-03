@@ -50,6 +50,7 @@ Each session uses a fresh UUID URL prefix so old TVs don't cache prior content. 
 
 - Direct (Chromecast) — `send` package, byte-range capable.
 - Transcoded (UPnP) — pipes `ffmpeg` MPEG-TS output. `BurnSubtitles` option burns subs into the video stream (most DLNA TVs don't honor sidecar subs).
+  - **Keep the `coalesce()` Transform between ffmpeg and the response.** ffmpeg's pipe output arrives in tiny pieces (often one 188-byte TS packet) and HTTP sockets run with Nagle off, so without it the TV receives hundreds of tiny TCP segments. LG TVs then decode partial frames: garbage along the bottom of the picture that clears at each keyframe. The bytes are fine — the identical stream sent in large writes plays clean. Symptoms that look like an encoder/decoder bug on transcoded streams only (never on direct play or a pre-encoded file) → suspect delivery first.
 
 [pickLocalIpFor](src/main/network.ts) selects the LAN interface on the target's subnet — required for correct URLs on multi-homed hosts (VPN, WSL, virtual adapters).
 

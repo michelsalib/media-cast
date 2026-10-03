@@ -83,6 +83,10 @@ export default function Dropper(props: Props): React.JSX.Element {
   const connected = props.device !== null;
   const hasSubs = subtitlesSelection.type !== 'no subtitles';
   const showBurnToggle = props.device?.type === 'upnp' && hasSubs;
+  // Image-based tracks can't be extracted as sidecar text — burning is the only option.
+  const forceBurn =
+    showBurnToggle && subtitlesSelection.type === 'internal' && subtitlesSelection.bitmap;
+  const effectiveBurn = showBurnToggle && (forceBurn || burnSubtitles);
 
   function ingest(files: Iterable<File>): void {
     for (const file of files) {
@@ -130,13 +134,12 @@ export default function Dropper(props: Props): React.JSX.Element {
       return;
     }
     const audioArg = audioSelection?.index;
-    const burn = props.device?.type === 'upnp' ? burnSubtitles : false;
     if (subtitlesSelection.type === 'external') {
-      window.api.load(video, subtitlesSelection.file, audioArg, burn);
+      window.api.load(video, subtitlesSelection.file, audioArg, effectiveBurn);
     } else if (subtitlesSelection.type === 'internal') {
-      window.api.load(video, subtitlesSelection.index, audioArg, burn);
+      window.api.load(video, subtitlesSelection.index, audioArg, effectiveBurn);
     } else {
-      window.api.load(video, undefined, audioArg, burn);
+      window.api.load(video, undefined, audioArg, effectiveBurn);
     }
   }
 
@@ -174,10 +177,10 @@ export default function Dropper(props: Props): React.JSX.Element {
       videoFileName: video.name,
       probeData,
       deviceType: props.device.type,
-      burnSubtitles: showBurnToggle && burnSubtitles,
+      burnSubtitles: effectiveBurn,
       audioIndex: audioSelection?.index,
     });
-  }, [video, probeData, props.device, showBurnToggle, burnSubtitles, audioSelection]);
+  }, [video, probeData, props.device, effectiveBurn, audioSelection]);
 
   const canCast = !!video && connected;
   const durationSec = probeData ? Number(probeData.format.duration) : Number.NaN;
@@ -486,6 +489,7 @@ export default function Dropper(props: Props): React.JSX.Element {
               <SubtitlesSelector
                 subFile={subs}
                 videoFile={video}
+                deviceType={props.device?.type}
                 onChange={setSubtitlesSelection}
               />
               {showBurnToggle && (
@@ -494,12 +498,17 @@ export default function Dropper(props: Props): React.JSX.Element {
                   <Tooltip
                     placement="top"
                     enterDelay={300}
-                    title="Re-encodes the video to embed subtitles. Required only for older TVs that ignore sidecar captions."
+                    title={
+                      forceBurn
+                        ? 'These subtitles are images (e.g. Blu-ray PGS) — they can only be shown by burning them into the video.'
+                        : 'Re-encodes the video to embed subtitles. Required only for older TVs that ignore sidecar captions.'
+                    }
                   >
                     <Box sx={{ justifySelf: 'start' }}>
                       <Switch
                         size="small"
-                        checked={burnSubtitles}
+                        checked={effectiveBurn}
+                        disabled={forceBurn}
                         onChange={(e) => setBurnSubtitles(e.target.checked)}
                       />
                     </Box>

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { extname } from 'node:path';
+import { Transform } from 'node:stream';
 import { promisify } from 'node:util';
 import send from 'send';
 import { type SubtitleSource, transcodeToMpegTs, type VideoSize } from './ffmpeg';
@@ -13,6 +14,7 @@ export interface ServeVideoOptions {
   burnSubtitles?: SubtitleSource;
   videoSize?: VideoSize;
   audioTrackIndex?: number;
+  hdr?: boolean;
 }
 
 export interface ServeSubtitlesOptions {
@@ -28,6 +30,7 @@ export class MediaServer {
   private currentSubtitleSource?: SubtitleSource;
   private currentVideoSize?: VideoSize;
   private currentAudioTrackIndex?: number;
+  private currentHdr = false;
   private currentSubtitlesData?: Buffer;
   private currentSubtitlesFormat: 'vtt' | 'srt' | 'smi' = 'vtt';
   private sessionHash = randomUUID();
@@ -118,10 +121,15 @@ export class MediaServer {
       burnSubtitles: this.currentSubtitleSource,
       videoSize: this.currentVideoSize,
       audioTrackIndex: this.currentAudioTrackIndex,
+      hdr: this.currentHdr,
     });
 
     res.writeHead(200, transcodedHeaders(this.currentDuration, seekSeconds));
-    handle.stream.pipe(res);
+    // ffmpeg's pipe output arrives in tiny pieces (often a single 188-byte TS packet),
+    // and HTTP sockets run with Nagle off, so each piece would go out as its own TCP
+    // segment. Some TVs (LG) then decode partial frames — garbage at the bottom of the
+    // picture until the next keyframe. Send fewer, larger writes instead.
+    handle.stream.pipe(coalesce(64 * 1024, 100)).pipe(res);
     handle.stream.on('error', () => res.destroy());
 
     const cleanup = (): void => handle.kill();
@@ -140,6 +148,7 @@ export class MediaServer {
     this.currentSubtitleSource = options.burnSubtitles;
     this.currentVideoSize = options.videoSize;
     this.currentAudioTrackIndex = options.audioTrackIndex;
+    this.currentHdr = options.hdr ?? false;
     // For direct-played files some DLNA TVs sniff the URL extension, so reflect
     // the source container; transcoded output is always MPEG-TS.
     const ext = options.transcode ? '.ts' : extname(videoPath).toLowerCase() || '';
@@ -207,4 +216,44 @@ function parseTimeSeekRange(header: string | undefined): number {
     }
   }
   return Number(value) || 0;
+}
+
+// Buffers small chunks and emits them as one, once `minBytes` have accumulated or
+// `maxDelayMs` have passed since the first buffered byte (keeps latency bounded when
+// the encoder is slow).
+function coalesce(minBytes: number, maxDelayMs: number): Transform {
+  let pending: Buffer[] = [];
+  let size = 0;
+  let timer: NodeJS.Timeout | undefined;
+
+  const flush = (stream: Transform): void => {
+    clearTimeout(timer);
+    timer = undefined;
+    if (size > 0) {
+      stream.push(Buffer.concat(pending, size));
+      pending = [];
+      size = 0;
+    }
+  };
+
+  return new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      pending.push(chunk);
+      size += chunk.length;
+      if (size >= minBytes) {
+        flush(this);
+      } else if (!timer) {
+        timer = setTimeout(() => flush(this), maxDelayMs);
+      }
+      callback();
+    },
+    flush(callback) {
+      flush(this);
+      callback();
+    },
+    destroy(error, callback) {
+      clearTimeout(timer);
+      callback(error);
+    },
+  });
 }

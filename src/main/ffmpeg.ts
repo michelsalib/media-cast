@@ -30,6 +30,7 @@ export interface FFProbeData {
     codec_type: 'subtitle' | 'audio' | 'video';
     width?: number;
     height?: number;
+    color_transfer?: string;
     tags: {
       language?: string;
       title?: string;
@@ -50,7 +51,21 @@ export type SubtitleFormat = 'vtt' | 'srt' | 'smi';
 
 export type SubtitleSource =
   | { source: 'external'; path: string }
-  | { source: 'internal'; videoPath: string; trackIndex: number };
+  | {
+      source: 'internal';
+      videoPath: string;
+      trackIndex: number;
+      // Set for image-based tracks (PGS, VobSub, DVB). libass can't render them, so
+      // burn-in goes through `overlay` instead. `canvas` is the track's presentation
+      // size, often larger than the video when the encode cropped the letterbox.
+      bitmap?: { canvas?: VideoSize };
+    };
+
+// PQ (HDR10 / Dolby Vision base layer) and HLG need tone mapping once squeezed into
+// 8-bit BT.709 — otherwise the picture comes out grey and washed out.
+export function isHdrTransfer(colorTransfer: string | undefined): boolean {
+  return colorTransfer === 'smpte2084' || colorTransfer === 'arib-std-b67';
+}
 
 export function extractSubtitles(source: SubtitleSource, format: 'srt' | 'vtt'): Promise<Buffer> {
   const inputPath = source.source === 'internal' ? source.videoPath : source.path;
@@ -83,6 +98,38 @@ export async function probe(videoPath: string): Promise<FFProbeData> {
   return JSON.parse(data.stdout);
 }
 
+// Bitmap subtitle tracks report no size under the default probe window — the first
+// packet usually sits seconds in. Probe just that stream with a wider window.
+export async function probeSubtitleCanvas(
+  videoPath: string,
+  trackIndex: number
+): Promise<VideoSize | undefined> {
+  try {
+    const { stdout } = await promisify(execFile)(ffprobePath, [
+      '-v',
+      'quiet',
+      '-analyzeduration',
+      '100M',
+      '-probesize',
+      '100M',
+      '-select_streams',
+      `s:${trackIndex}`,
+      '-show_entries',
+      'stream=width,height',
+      '-print_format',
+      'json',
+      '-i',
+      videoPath,
+    ]);
+    const stream = JSON.parse(stdout).streams?.[0];
+    return stream?.width && stream?.height
+      ? { width: stream.width, height: stream.height }
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function thumbnail(videoPath: string, width = 800, height = 600): Promise<Buffer> {
   return runFfmpeg([
     '-i',
@@ -110,6 +157,7 @@ export interface TranscodeOptions {
   burnSubtitles?: SubtitleSource;
   videoSize?: VideoSize;
   audioTrackIndex?: number;
+  hdr?: boolean;
 }
 
 export interface TranscodeHandle {
@@ -123,7 +171,14 @@ export interface TranscodeHandle {
  * Returns a Readable for the caller to pipe somewhere, plus a kill function.
  */
 export async function transcodeToMpegTs(options: TranscodeOptions): Promise<TranscodeHandle> {
-  const { videoPath, seekSeconds = 0, burnSubtitles, videoSize, audioTrackIndex = 0 } = options;
+  const {
+    videoPath,
+    seekSeconds = 0,
+    burnSubtitles,
+    videoSize,
+    audioTrackIndex = 0,
+    hdr = false,
+  } = options;
 
   const args: string[] = [];
   if (seekSeconds > 0) {
@@ -133,22 +188,32 @@ export async function transcodeToMpegTs(options: TranscodeOptions): Promise<Tran
   }
   args.push('-i', videoPath);
 
-  // Crop a few rows from the bottom — removes a glitchy edge row that x264 sometimes
-  // produces. Subtitles are placed after the crop so libass scales against the actual
-  // rendered height.
-  const cropBottom = 4;
-  const filters: string[] = [`crop=iw:ih-${cropBottom}:0:0`];
-  if (burnSubtitles) {
-    const adjustedSize = videoSize
-      ? { width: videoSize.width, height: videoSize.height - cropBottom }
-      : undefined;
-    filters.push(buildSubtitlesFilter(burnSubtitles, adjustedSize));
+  // Crop to multiples of 16 (the H.264 macroblock size) so the stream needs no
+  // cropping rectangle — one less thing for weak TV decoders to get wrong. Subtitles
+  // are placed after the crop so libass scales against the actual rendered height.
+  const videoFilters: string[] = [];
+  if (hdr) {
+    videoFilters.push(HDR_TONEMAP_FILTER);
   }
-  args.push('-vf', filters.join(','));
+  videoFilters.push('crop=trunc(iw/16)*16:trunc(ih/16)*16');
+  const croppedSize = videoSize ? alignTo16(videoSize) : undefined;
+
+  if (burnSubtitles?.source === 'internal' && burnSubtitles.bitmap) {
+    const graph = buildBitmapOverlayGraph(
+      videoFilters,
+      burnSubtitles.trackIndex,
+      burnSubtitles.bitmap.canvas,
+      croppedSize
+    );
+    args.push('-filter_complex', graph, '-map', '[out]');
+  } else {
+    if (burnSubtitles) {
+      videoFilters.push(buildSubtitlesFilter(burnSubtitles, croppedSize));
+    }
+    args.push('-vf', videoFilters.join(','), '-map', '0:v:0');
+  }
 
   args.push(
-    '-map',
-    '0:v:0',
     '-map',
     `0:a:${audioTrackIndex}?`,
     '-c:v',
@@ -177,10 +242,8 @@ export async function transcodeToMpegTs(options: TranscodeOptions): Promise<Tran
     '192k',
     '-f',
     'mpegts',
-    '-muxdelay',
-    '0',
-    '-muxpreload',
-    '0',
+    // Keep the muxer's default delay (0.7s). With -muxdelay 0 most frames finish
+    // arriving after their DTS, which breaks the MPEG-TS buffer model decoders rely on.
     'pipe:1'
   );
 
@@ -217,6 +280,51 @@ export async function transcodeToMpegTs(options: TranscodeOptions): Promise<Tran
   };
 }
 
+// Linearize, tone map to SDR, then convert back to BT.709 limited range.
+const HDR_TONEMAP_FILTER = [
+  // Drop the HDR10 metadata too, or x264 copies it into the SDR stream as SEI.
+  'sidedata=mode=delete:type=MASTERING_DISPLAY_METADATA',
+  'sidedata=mode=delete:type=CONTENT_LIGHT_LEVEL',
+  'zscale=t=linear:npl=100',
+  'format=gbrpf32le',
+  'zscale=p=bt709',
+  'tonemap=hable:desat=0',
+  'zscale=t=bt709:m=bt709:r=tv',
+  'format=yuv420p',
+].join(',');
+
+function alignTo16(size: VideoSize): VideoSize {
+  return {
+    width: Math.floor(size.width / 16) * 16,
+    height: Math.floor(size.height / 16) * 16,
+  };
+}
+
+function buildBitmapOverlayGraph(
+  videoFilters: string[],
+  trackIndex: number,
+  rawCanvas: VideoSize | undefined,
+  videoSize: VideoSize | undefined
+): string {
+  const video = [...videoFilters];
+  const subs = ['null'];
+  // Same multiple-of-16 constraint as the video crop; the centered overlay below
+  // trims the few canvas rows that don't fit.
+  const canvas = rawCanvas ? alignTo16(rawCanvas) : undefined;
+  if (canvas && videoSize && canvas.width >= videoSize.width && canvas.height >= videoSize.height) {
+    // The encode was cropped from the original frame (letterbox bars removed): put the
+    // bars back so cues positioned inside them stay on screen.
+    video.push(`pad=${canvas.width}:${canvas.height}:(ow-iw)/2:(oh-ih)/2`);
+  } else if (videoSize) {
+    subs.push(`scale=${videoSize.width}:${videoSize.height}`);
+  }
+  return [
+    `[0:v:0]${video.join(',')}[video]`,
+    `[0:s:${trackIndex}]${subs.join(',')}[subs]`,
+    '[video][subs]overlay=(W-w)/2:(H-h)/2:eof_action=pass[out]',
+  ].join(';');
+}
+
 export function buildSubtitlesFilter(
   spec: SubtitleSource,
   videoSize: VideoSize | undefined
@@ -229,11 +337,6 @@ export function buildSubtitlesFilter(
   if (videoSize) {
     parts.push(`original_size=${videoSize.width}x${videoSize.height}`);
   }
-  // SRT has no PlayResY, so libass scales FontSize against storage_height — i.e.
-  // FontSize maps to ~pixels at the output resolution. Pick it as a fraction of
-  // the frame so subs stay the same visual size across 480p / 720p / 1080p / 4K.
-  const fontSize = videoSize ? Math.round(videoSize.height * 0.03) : 18;
-  parts.push(`force_style=FontSize=${fontSize}`);
   return `subtitles=${parts.join(':')}`;
 }
 
