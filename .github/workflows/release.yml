@@ -13,6 +13,9 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     strategy:
+      # Publish one platform at a time: parallel jobs race to create the GitHub release
+      # and can end up with two releases for one tag (seen on v2.0.0-alpha.0).
+      max-parallel: 1
       matrix:
         os:
           # Ubuntu needs snapcraft, commenting for now
