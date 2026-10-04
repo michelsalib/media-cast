@@ -8,14 +8,28 @@ on:
     tags:
       - v*.*.*
 
+env:
+  TAG: ${{ github.ref_name }}
+
 jobs:
+  # electron-builder's GitHub publisher races with itself when no release exists yet
+  # (a single job created two v2.0.0 releases). Creating the draft up front means every
+  # upload from every job lands in the same release; `publish` flips it live at the end.
+  prepare:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Create draft release
+        run: |
+          gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$TAG" -R "$GITHUB_REPOSITORY" --draft --title "$TAG" --notes ""
+
   release:
+    needs: prepare
     runs-on: ${{ matrix.os }}
 
     strategy:
-      # Publish one platform at a time: parallel jobs race to create the GitHub release
-      # and can end up with two releases for one tag (seen on v2.0.0-alpha.0).
-      max-parallel: 1
       matrix:
         os:
           # Ubuntu needs snapcraft, commenting for now
@@ -25,9 +39,6 @@ jobs:
 
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      # Tags with a prerelease suffix (v2.0.0-alpha.0) publish as GitHub pre-releases, so
-      # stable installs (electron-updater follows /releases/latest) never auto-update to them.
-      EP_PRE_RELEASE: ${{ contains(github.ref_name, '-') }}
 
     steps:
       - name: Check out Git repository
@@ -62,3 +73,16 @@ jobs:
       - name: build-win
         if: matrix.os == 'windows-latest'
         run: bun run build:win
+
+  publish:
+    needs: release
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      # Tags with a prerelease suffix (v2.0.0-alpha.0) become GitHub pre-releases, so stable
+      # installs (electron-updater follows /releases/latest) never auto-update to them.
+      - name: Publish release
+        run: |
+          if [[ "$TAG" == *-* ]]; then PRE=--prerelease; else PRE=--prerelease=false; fi
+          gh release edit "$TAG" -R "$GITHUB_REPOSITORY" --draft=false $PRE
