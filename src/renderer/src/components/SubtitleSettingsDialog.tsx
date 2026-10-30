@@ -115,14 +115,22 @@ export default function SubtitleSettingsDialog({
               />
             </Stack>
             <TextField
-              label="API key (optional)"
+              label={osBuiltIn ? 'API key (optional)' : 'API key'}
               size="small"
               value={osApiKey}
               onChange={(e) => setOsApiKey(e.target.value)}
               helperText={
-                osBuiltIn
-                  ? "Leave empty to use the app's key."
-                  : 'This build has no OpenSubtitles key — create a consumer key on opensubtitles.com.'
+                osBuiltIn ? (
+                  "Leave empty to use the app's key."
+                ) : (
+                  <>
+                    Free — create a consumer key in your{' '}
+                    <Link href="https://www.opensubtitles.com/en/consumers" target="_blank">
+                      opensubtitles.com API consumers
+                    </Link>{' '}
+                    page.
+                  </>
+                )
               }
             />
           </Stack>

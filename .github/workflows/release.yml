@@ -39,9 +39,6 @@ jobs:
 
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      # Baked into the main bundle by electron-vite (MAIN_VITE_ prefix); see .env.local.
-      MAIN_VITE_OPENSUBTITLES_API_KEY: ${{ secrets.OPENSUBTITLES_API_KEY }}
-      MAIN_VITE_SUBDL_API_KEY: ${{ secrets.SUBDL_API_KEY }}
 
     steps:
       - name: Check out Git repository
