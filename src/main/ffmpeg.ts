@@ -37,6 +37,7 @@ export interface FFProbeData {
     pix_fmt?: string;
     width?: number;
     height?: number;
+    channels?: number;
     color_transfer?: string;
     avg_frame_rate?: string;
     // ffprobe omits `tags` entirely on untagged streams.

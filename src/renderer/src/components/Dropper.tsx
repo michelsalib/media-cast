@@ -1,104 +1,88 @@
 import {
-  ArrowDropDown,
-  AvTimer,
-  Bolt,
-  Cast,
-  ExpandMore,
-  FolderOpen,
-  ManageSearch,
-  Memory,
-  MovieCreation,
-  VideoFile,
+  AddRounded,
+  ArrowBackRounded,
+  AutoAwesomeRounded,
+  BoltRounded,
+  FileDownloadRounded,
+  PlayArrowRounded,
 } from '@mui/icons-material';
 import {
-  Accordion,
-  AccordionDetails,
-  AccordionSummary,
   Alert,
-  alpha,
   Backdrop,
   Box,
   Button,
-  ButtonGroup,
-  IconButton,
-  keyframes,
-  ListItemIcon,
-  ListItemText,
-  Menu,
-  MenuItem,
+  CircularProgress,
+  FormControlLabel,
+  Link,
   Snackbar,
   Stack,
   Switch,
-  type SxProps,
   Tooltip,
   Typography,
-  useTheme,
 } from '@mui/material';
-import format from 'format-duration';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { FFProbeData } from '../../../main/ffmpeg';
 import { type CompatReport, checkCompat } from '../../../shared/compat';
-import type { Device } from '../../../shared/types';
-import { api, errorMessage, pathFor } from '../ipc';
+import type { Device, PlayerStatus } from '../../../shared/types';
+import type { Connection } from '../App';
+import { api, errorMessage, onEvent, pathFor } from '../ipc';
+import { episodeLabel, resolutionLabel, runtimeLabel } from '../labels';
+import { glassSx } from '../theme';
+import { AmbientBackdrop, Artwork, useObjectUrl } from './Artwork';
 import type { AudioSelection } from './AudioSelection';
 import AudioSelector from './AudioSelector';
+import Player from './Player';
 import SubtitleSearchDialog from './SubtitleSearchDialog';
 import SubtitleSyncDialog, { type SyncSource } from './SubtitleSyncDialog';
 import { NO_SUBTITLES, type SubtitlesFile, type SubtitlesSelection } from './SubtitlesSelection';
 import SubtitlesSelector from './SubtitlesSelector';
 import VideoInfoButton from './VideoInfoButton';
 
-type Props = SxProps & {
-  children: React.JSX.Element;
-  device: Device | null;
+type Props = {
+  connection: Connection | null;
+  onConnect: (device: Device) => Promise<boolean>;
+  onStop: () => void;
+  // The device picker, labelled for the view it sits in.
+  devices: (label: string) => React.ReactNode;
 };
+
+type ReleaseInfo = Awaited<ReturnType<typeof api.guessSubtitleQuery>>;
+
+// What was sent to the TV, kept apart from the video being prepared next.
+type NowPlaying = { thumbnail?: Uint8Array; title: string; details?: string };
 
 const VIDEO_EXTENSIONS = ['.mp4', '.mkv', '.avi'];
 // Text formats main can extract or burn (see TEXT_SUBTITLE_EXTENSIONS in subtitleExtractor).
 const SUBTITLE_EXTENSIONS = ['.srt', '.vtt', '.ass', '.ssa'];
 
-const glow = keyframes`
-  0%, 100% { box-shadow: 0 0 0 0 rgba(124,77,255,0.5); }
-  50%      { box-shadow: 0 0 0 6px rgba(124,77,255,0); }
-`;
-
-const marquee = keyframes`
-  0%, 10%   { transform: translateX(0); }
-  50%, 90%  { transform: translateX(calc(-1 * var(--marquee-distance, 0px))); animation-timing-function: steps(1, end); }
-  100%      { transform: translateX(0); }
-`;
-
-export default function Dropper(props: Props): React.JSX.Element {
+export default function Dropper({
+  connection,
+  onConnect,
+  onStop,
+  devices,
+}: Props): React.JSX.Element {
   const [isOver, setIsOver] = useState(false);
-  const [isOpen, setIsOpen] = useState(false);
   const [video, setVideo] = useState<File | undefined>();
   const [subs, setSubs] = useState<SubtitlesFile | undefined>();
   const [subtitlesSelection, setSubtitlesSelection] = useState<SubtitlesSelection>(NO_SUBTITLES);
   const [audioSelection, setAudioSelection] = useState<AudioSelection | undefined>();
   const [thumbnail, setThumbnail] = useState<Uint8Array | undefined>(undefined);
   const [probeData, setProbeData] = useState<FFProbeData | undefined>(undefined);
+  const [release, setRelease] = useState<ReleaseInfo | undefined>();
   const [burnSubtitles, setBurnSubtitles] = useState(false);
   const [casting, setCasting] = useState(false);
   const [castError, setCastError] = useState<string | undefined>();
   const [searchOpen, setSearchOpen] = useState(false);
   const [syncSource, setSyncSource] = useState<SyncSource | undefined>();
-  const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
-  const [marqueeDistance, setMarqueeDistance] = useState(0);
+  const [status, setStatus] = useState<PlayerStatus | undefined>();
+  const [nowPlaying, setNowPlaying] = useState<NowPlaying | undefined>();
+  // Preparing another video while one plays.
+  const [browsing, setBrowsing] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
-  const nameRef = useRef<HTMLSpanElement>(null);
 
-  function startMarquee(): void {
-    const el = nameRef.current;
-    if (!el) return;
-    setMarqueeDistance(Math.max(0, el.scrollWidth - el.clientWidth));
-  }
-  function stopMarquee(): void {
-    setMarqueeDistance(0);
-  }
-  const theme = useTheme();
-  const connected = props.device !== null;
+  const device = connection?.device ?? null;
   const hasSubs = subtitlesSelection.type !== 'no subtitles';
-  const showBurnToggle = props.device?.type === 'upnp' && hasSubs;
+  const showBurnToggle = device?.type === 'upnp' && hasSubs;
   // Image-based tracks can't be extracted as sidecar text — burning is the only option.
   const forceBurn =
     showBurnToggle && subtitlesSelection.type === 'internal' && subtitlesSelection.bitmap;
@@ -112,12 +96,23 @@ export default function Dropper(props: Props): React.JSX.Element {
         ? { name: subtitlesSelection.name, pathOrIndex: subtitlesSelection.index }
         : undefined;
 
+  useEffect(() => onEvent('status', setStatus), []);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-run on device or connection change to clear stale status
+  useEffect(() => {
+    setStatus(undefined);
+  }, [connection?.device.id, connection?.state]);
+
+  const active = connection?.state === 'CONNECTED' && !!status && status.playerState !== 'IDLE';
+  const view = active && (!browsing || !video) ? 'playing' : video ? 'ready' : 'empty';
+
   function ingest(files: Iterable<File>): void {
     const rejected: string[] = [];
     for (const file of files) {
       const ext = extensionOf(file.name);
       if (VIDEO_EXTENSIONS.includes(ext)) {
         setVideo(file);
+        setBrowsing(true);
       } else if (SUBTITLE_EXTENSIONS.includes(ext)) {
         setSubs({ name: file.name, path: pathFor(file) });
       } else {
@@ -135,18 +130,15 @@ export default function Dropper(props: Props): React.JSX.Element {
     event.preventDefault();
     ingest(event.dataTransfer.files);
     setIsOver(false);
-    setIsOpen(true);
   }
 
-  function browse(event: React.MouseEvent): void {
-    event.stopPropagation();
+  function browse(): void {
     fileInput.current?.click();
   }
 
   function onFilesPicked(event: React.ChangeEvent<HTMLInputElement>): void {
     if (event.target.files) {
       ingest(event.target.files);
-      setIsOpen(true);
     }
     event.target.value = '';
   }
@@ -159,25 +151,6 @@ export default function Dropper(props: Props): React.JSX.Element {
   function dragLeave(event: React.DragEvent): void {
     event.preventDefault();
     setIsOver(false);
-  }
-
-  function cast(event: React.MouseEvent): void {
-    event.stopPropagation();
-    if (!video) {
-      return;
-    }
-    const subsArg =
-      subtitlesSelection.type === 'external'
-        ? subtitlesSelection.path
-        : subtitlesSelection.type === 'internal'
-          ? subtitlesSelection.index
-          : undefined;
-    setCasting(true);
-    setCastError(undefined);
-    api
-      .load(pathFor(video), subsArg, audioSelection?.index, effectiveBurn)
-      .catch((err: unknown) => setCastError(errorMessage(err)))
-      .finally(() => setCasting(false));
   }
 
   useEffect(() => {
@@ -210,44 +183,95 @@ export default function Dropper(props: Props): React.JSX.Element {
     };
   }, [video]);
 
+  useEffect(() => {
+    if (!videoPath) {
+      setRelease(undefined);
+      return;
+    }
+    let cancelled = false;
+    api
+      .guessSubtitleQuery(videoPath)
+      .then((info) => !cancelled && setRelease(info))
+      .catch(() => !cancelled && setRelease(undefined));
+    return () => {
+      cancelled = true;
+    };
+  }, [videoPath]);
+
   const compat = useMemo<CompatReport | undefined>(() => {
-    if (!video || !probeData || !props.device) return undefined;
+    if (!video || !probeData || !device) return undefined;
     return checkCompat({
       videoFileName: video.name,
       probeData,
-      deviceType: props.device.type,
-      acceptedVideoMimes: props.device.acceptedVideoMimes,
-      acceptedWildcardVideoMimes: props.device.acceptedWildcardVideoMimes,
+      deviceType: device.type,
+      acceptedVideoMimes: device.acceptedVideoMimes,
+      acceptedWildcardVideoMimes: device.acceptedWildcardVideoMimes,
       burnSubtitles: effectiveBurn,
       audioIndex: audioSelection?.index,
     });
-  }, [video, probeData, props.device, effectiveBurn, audioSelection]);
+  }, [video, probeData, device, effectiveBurn, audioSelection]);
 
-  const canCast = !!video && connected && !casting;
-  const durationSec = probeData ? Number(probeData.format.duration) : Number.NaN;
-  const durationLabel = Number.isFinite(durationSec) ? format(durationSec * 1000) : null;
-  const caption = !video
-    ? `Drag ${VIDEO_EXTENSIONS.join(' / ')} and optionally a subtitle file`
-    : (durationLabel ?? formatBytes(video.size));
+  const thumbnailUrl = useObjectUrl(thumbnail);
+  const nowPlayingUrl = useObjectUrl(nowPlaying?.thumbnail);
+
+  const title = release?.title || (video ? stripExtension(video.name) : '');
+  const eyebrow = release ? episodeLabel(release) : undefined;
+  const videoStream = probeData?.streams.find((s) => s.codec_type === 'video');
+  const meta = [
+    probeData ? runtimeLabel(Number(probeData.format.duration)) : undefined,
+    resolutionLabel(videoStream?.height),
+  ]
+    .filter(Boolean)
+    .join(' · ');
   const hasAudio = probeData?.streams.some((s) => s.codec_type === 'audio') ?? false;
-  // A Blob URL, not a base64 data URL: spreading a large frame into
-  // String.fromCharCode overflows the argument limit. Created in the same effect that
-  // revokes it — StrictMode runs the cleanup once on mount, which would otherwise
-  // revoke a memoized URL that is still on screen.
-  const [thumbnailUrl, setThumbnailUrl] = useState<string | undefined>();
-  useEffect(() => {
-    if (!thumbnail) {
-      setThumbnailUrl(undefined);
+  const subtitlesLabel =
+    subtitlesSelection.type === 'internal'
+      ? `${subtitlesSelection.name} subtitles`
+      : subtitlesSelection.type === 'external'
+        ? 'Added subtitles'
+        : undefined;
+
+  const canPlay = !!video && !!device && !casting && connection?.state !== 'CONNECTING';
+
+  async function play(): Promise<void> {
+    if (!video || !device || !connection) {
       return;
     }
-    const url = URL.createObjectURL(new Blob([new Uint8Array(thumbnail)], { type: 'image/jpeg' }));
-    setThumbnailUrl(url);
-    return () => URL.revokeObjectURL(url);
-  }, [thumbnail]);
+    const subsArg =
+      subtitlesSelection.type === 'external'
+        ? subtitlesSelection.path
+        : subtitlesSelection.type === 'internal'
+          ? subtitlesSelection.index
+          : undefined;
+    setCasting(true);
+    setCastError(undefined);
+    try {
+      // After Stop the device stays picked but disconnected.
+      if (connection.state !== 'CONNECTED' && !(await onConnect(device))) {
+        return;
+      }
+      await api.load(pathFor(video), subsArg, audioSelection?.index, effectiveBurn);
+      setNowPlaying({
+        thumbnail,
+        title,
+        details: [eyebrow, subtitlesLabel].filter(Boolean).join(' · ') || undefined,
+      });
+      setBrowsing(false);
+    } catch (err) {
+      setCastError(errorMessage(err));
+    } finally {
+      setCasting(false);
+    }
+  }
 
   return (
-    <Box onDrop={drop} onDragOver={dragOver} onDragLeave={dragLeave} sx={{ height: '100%' }}>
-      {props.children}
+    <Box
+      onDrop={drop}
+      onDragOver={dragOver}
+      onDragLeave={dragLeave}
+      sx={{ height: '100%', position: 'relative', overflow: 'hidden' }}
+    >
+      <AmbientBackdrop url={view === 'playing' ? nowPlayingUrl : thumbnailUrl} />
       <input
         ref={fileInput}
         type="file"
@@ -257,338 +281,210 @@ export default function Dropper(props: Props): React.JSX.Element {
         onChange={onFilesPicked}
       />
 
-      <Accordion
-        expanded={isOpen || isOver}
-        onChange={() => setIsOpen(!isOpen)}
-        variant="elevation"
-        elevation={0}
-        sx={{
-          width: 520,
-          position: 'absolute',
-          bottom: 0,
-          left: '50%',
-          transform: 'translate(-50%)',
-          margin: '0px !important',
-          background: `linear-gradient(180deg, ${alpha(
-            theme.palette.background.paper,
-            0.85
-          )} 0%, ${alpha(theme.palette.background.paper, 0.95)} 100%)`,
-          backdropFilter: 'blur(12px)',
-          border: '1px solid rgba(255,255,255,0.08)',
-          borderBottom: 'none',
-          borderTopLeftRadius: 16,
-          borderTopRightRadius: 16,
-          borderBottomLeftRadius: '0 !important',
-          borderBottomRightRadius: '0 !important',
-          boxShadow: '0 -8px 32px rgba(0,0,0,0.4)',
-          '&::before': { height: 0 },
-          '&.Mui-expanded': { margin: '0px !important' },
-        }}
-      >
-        <AccordionSummary
-          expandIcon={<ExpandMore />}
-          sx={{
-            px: 2.5,
-            '& .MuiAccordionSummary-content': {
-              alignItems: 'center',
-              gap: 1.5,
-              my: 1.5,
-              overflow: 'hidden',
-            },
-          }}
-        >
-          <Box
-            sx={{
-              width: thumbnailUrl ? (32 * 16) / 9 : 32,
-              height: 32,
-              borderRadius: thumbnailUrl ? 0.5 : 1.5,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0,
-              overflow: 'hidden',
-              backgroundColor: alpha(
-                video ? theme.palette.primary.main : theme.palette.text.secondary,
-                0.15
-              ),
-              color: video ? theme.palette.primary.light : theme.palette.text.secondary,
-              backgroundImage: thumbnailUrl ? `url(${thumbnailUrl})` : undefined,
-              backgroundSize: 'cover',
-              backgroundPosition: 'center',
-            }}
-          >
-            {!thumbnailUrl && <MovieCreation fontSize="small" />}
-          </Box>
-          <Stack sx={{ overflow: 'hidden', minWidth: 0, flex: 1 }}>
-            <Box
-              onMouseEnter={startMarquee}
-              onMouseLeave={stopMarquee}
-              sx={{ overflow: 'hidden', minWidth: 0 }}
+      {/* 32px: the title bar drawn over this by App. */}
+      <Stack sx={{ position: 'relative', zIndex: 1, height: '100%', pt: '32px' }}>
+        {view === 'playing' && status && device && (
+          <Player
+            status={status}
+            device={device}
+            artworkUrl={nowPlayingUrl}
+            title={nowPlaying?.title || status.title || 'Now playing'}
+            details={nowPlaying?.details}
+            onBrowse={browse}
+            onStop={onStop}
+          />
+        )}
+
+        {view === 'empty' && (
+          <Stack sx={{ flex: 1, minHeight: 0, px: 4 }}>
+            <Stack
+              sx={{
+                flex: 1,
+                minHeight: 0,
+                alignItems: 'center',
+                justifyContent: 'center',
+                textAlign: 'center',
+              }}
             >
-              <Typography
-                ref={nameRef}
+              <Illustration />
+              <Typography variant="h1" sx={{ mt: 2.5 }}>
+                What are we watching?
+              </Typography>
+              <Typography sx={{ mt: 1.25, fontSize: 16, color: 'text.secondary' }}>
+                Drop a movie or an episode anywhere in this window.
+              </Typography>
+              <Button
+                size="large"
+                onClick={browse}
+                startIcon={<AddRounded />}
                 sx={{
-                  fontWeight: 600,
-                  fontSize: 14,
-                  color: video ? 'text.primary' : 'text.secondary',
-                  whiteSpace: 'nowrap',
-                  ...(marqueeDistance > 0
-                    ? {
-                        display: 'inline-block',
-                        '--marquee-distance': `${marqueeDistance}px`,
-                        animation: `${marquee} ${marqueeDistance / 40 + 3}s ease-in-out infinite`,
-                      }
-                    : {
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                      }),
+                  mt: 3,
+                  bgcolor: '#FFFFFF',
+                  color: '#0B0C14',
+                  '&:hover': { bgcolor: '#E8EAF2' },
                 }}
               >
-                {video ? video.name : 'Drop a video file to get started'}
+                Choose a video
+              </Button>
+              <Typography sx={{ mt: 1.5, fontSize: 12, color: '#9DA2B8' }}>
+                Subtitles too — drop them in with the video, or find them online later.
               </Typography>
-            </Box>
-            <Stack direction="row" spacing={1} sx={{ minWidth: 0, alignItems: 'center' }}>
-              <Typography noWrap variant="caption" sx={{ color: 'text.secondary' }}>
-                {caption}
-              </Typography>
-              {compat && <CompatChip report={compat} />}
+            </Stack>
+            <Box sx={{ pb: 3.5 }}>{devices('Ready to play on')}</Box>
+          </Stack>
+        )}
+
+        {view === 'ready' && video && (
+          <Stack sx={{ flex: 1, minHeight: 0 }}>
+            <Stack
+              spacing={3.25}
+              sx={{ flex: 1, minHeight: 0, overflowY: 'auto', px: 4, pt: 2.25, pb: 2 }}
+            >
+              {active && (
+                <Button
+                  onClick={() => setBrowsing(false)}
+                  startIcon={<ArrowBackRounded />}
+                  sx={{ ...glassSx, alignSelf: 'flex-start', height: 32 }}
+                >
+                  Now playing
+                </Button>
+              )}
+              <Stack direction="row" spacing={3.5} sx={{ alignItems: 'flex-end' }}>
+                <Artwork url={thumbnailUrl} sx={{ width: 'min(320px, 38%)' }} />
+                <Stack spacing={1} sx={{ flex: 1, minWidth: 0, pb: 0.5 }}>
+                  {eyebrow && (
+                    <Typography sx={{ fontSize: 13, fontWeight: 500, color: 'primary.light' }}>
+                      {eyebrow}
+                    </Typography>
+                  )}
+                  <Typography
+                    variant="h1"
+                    title={video.name}
+                    sx={{
+                      display: '-webkit-box',
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: 'vertical',
+                      overflow: 'hidden',
+                      wordBreak: 'break-word',
+                    }}
+                  >
+                    {title}
+                  </Typography>
+                  {meta && <Typography sx={{ color: 'text.secondary' }}>{meta}</Typography>}
+                  <Stack
+                    direction="row"
+                    useFlexGap
+                    sx={{
+                      gap: 0.5,
+                      mt: 0.75,
+                      ml: compat && device ? 0 : -2,
+                      flexWrap: 'wrap',
+                      alignItems: 'center',
+                    }}
+                  >
+                    {compat && device && <CompatPill report={compat} deviceName={device.name} />}
+                    <VideoInfoButton video={video} />
+                    <Button
+                      size="small"
+                      onClick={browse}
+                      sx={{ color: 'text.secondary', fontWeight: 500 }}
+                    >
+                      Change
+                    </Button>
+                  </Stack>
+                </Stack>
+              </Stack>
+
+              <Stack spacing={2}>
+                {hasAudio && (
+                  <TrackRow label="Audio">
+                    <AudioSelector videoFile={video} onChange={setAudioSelection} />
+                  </TrackRow>
+                )}
+                <TrackRow label="Subtitles">
+                  <Stack spacing={1.25}>
+                    <SubtitlesSelector
+                      subFile={subs}
+                      videoFile={video}
+                      deviceType={device?.type}
+                      onChange={setSubtitlesSelection}
+                    />
+                    <Stack
+                      direction="row"
+                      useFlexGap
+                      sx={{ gap: 2.25, alignItems: 'center', flexWrap: 'wrap', minHeight: 32 }}
+                    >
+                      <Link component="button" onClick={() => setSearchOpen(true)} sx={linkSx}>
+                        Find more online
+                      </Link>
+                      {syncableSelection && (
+                        <Link
+                          component="button"
+                          onClick={() => setSyncSource(syncableSelection)}
+                          sx={linkSx}
+                        >
+                          Adjust timing
+                        </Link>
+                      )}
+                      {showBurnToggle && (
+                        <Tooltip
+                          placement="top"
+                          enterDelay={300}
+                          title={
+                            forceBurn
+                              ? 'These subtitles are images (e.g. Blu-ray PGS) — they can only be shown by burning them into the video.'
+                              : 'Re-encodes the video to embed subtitles. Needed only for TVs that ignore separate subtitle files.'
+                          }
+                        >
+                          <FormControlLabel
+                            control={
+                              <Switch
+                                size="small"
+                                checked={effectiveBurn}
+                                disabled={forceBurn}
+                                onChange={(e) => setBurnSubtitles(e.target.checked)}
+                              />
+                            }
+                            label="Burn into the picture"
+                            slotProps={{ typography: { sx: { fontSize: 13 } } }}
+                            sx={{ m: 0, gap: 0.5 }}
+                          />
+                        </Tooltip>
+                      )}
+                    </Stack>
+                  </Stack>
+                </TrackRow>
+              </Stack>
+            </Stack>
+
+            <Stack
+              direction="row"
+              spacing={2}
+              sx={{ alignItems: 'flex-end', px: 4, pt: 1, pb: 3.5 }}
+            >
+              <Box sx={{ flex: 1, minWidth: 0 }}>{devices('Play on')}</Box>
+              <Button
+                variant="contained"
+                size="large"
+                onClick={() => void play()}
+                disabled={!canPlay}
+                startIcon={
+                  casting ? <CircularProgress size={18} color="inherit" /> : <PlayArrowRounded />
+                }
+                sx={{ flexShrink: 0, maxWidth: 300, mb: 0.75 }}
+              >
+                <Box
+                  component="span"
+                  sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                >
+                  {device ? `Play on ${device.name}` : 'Pick a screen'}
+                </Box>
+              </Button>
             </Stack>
           </Stack>
-          {video ? (
-            <Tooltip placement="top" title={!connected ? 'Connect to cast device first' : ''}>
-              <ButtonGroup
-                variant="contained"
-                size="small"
-                disableElevation
-                sx={{
-                  flexShrink: 0,
-                  mr: 1,
-                  borderRadius: 2,
-                  overflow: 'hidden',
-                  background: canCast
-                    ? `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.primary.dark} 100%)`
-                    : alpha(theme.palette.primary.main, 0.18),
-                  animation: canCast ? `${glow} 2s ease-in-out infinite` : 'none',
-                  transition: 'background 200ms ease',
-                  '&:hover': canCast
-                    ? {
-                        background: `linear-gradient(135deg, ${theme.palette.primary.light} 0%, ${theme.palette.primary.main} 100%)`,
-                      }
-                    : undefined,
-                  '& .MuiButton-root': {
-                    background: 'transparent',
-                    boxShadow: 'none',
-                    color: canCast ? '#fff' : alpha(theme.palette.primary.light, 0.7),
-                    borderColor: alpha(theme.palette.common.black, 0.25),
-                    '&:hover': {
-                      background: alpha(theme.palette.common.white, 0.08),
-                    },
-                    '&.Mui-disabled': {
-                      color: alpha(theme.palette.primary.light, 0.55),
-                      borderColor: alpha(theme.palette.common.black, 0.25),
-                    },
-                  },
-                }}
-              >
-                <Button
-                  component="div"
-                  role="button"
-                  onClick={cast}
-                  disabled={!canCast}
-                  startIcon={<Cast />}
-                  sx={{
-                    px: 2,
-                    fontWeight: 600,
-                    letterSpacing: 1,
-                  }}
-                >
-                  Cast
-                </Button>
-                <Button
-                  component="div"
-                  role="button"
-                  aria-label="more options"
-                  aria-haspopup="menu"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setMenuAnchor(e.currentTarget);
-                  }}
-                  sx={{
-                    px: 0.5,
-                    minWidth: 32,
-                  }}
-                >
-                  <ArrowDropDown />
-                </Button>
-              </ButtonGroup>
-            </Tooltip>
-          ) : (
-            <Button
-              component="div"
-              role="button"
-              variant="outlined"
-              size="small"
-              onClick={browse}
-              startIcon={<FolderOpen />}
-              sx={{
-                flexShrink: 0,
-                mr: 1,
-                fontWeight: 600,
-                letterSpacing: 0.5,
-                borderRadius: 2,
-                borderColor: alpha(theme.palette.primary.light, 0.4),
-                color: theme.palette.primary.light,
-                '&:hover': {
-                  borderColor: theme.palette.primary.light,
-                  backgroundColor: alpha(theme.palette.primary.main, 0.08),
-                },
-              }}
-            >
-              Browse
-            </Button>
-          )}
-          <Menu
-            anchorEl={menuAnchor}
-            open={!!menuAnchor}
-            onClose={() => setMenuAnchor(null)}
-            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-            transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <MenuItem
-              onClick={(e) => {
-                setMenuAnchor(null);
-                browse(e);
-              }}
-            >
-              <ListItemIcon>
-                <FolderOpen fontSize="small" />
-              </ListItemIcon>
-              <ListItemText>Browse…</ListItemText>
-            </MenuItem>
-          </Menu>
-        </AccordionSummary>
-        <AccordionDetails sx={{ pt: 0, pb: 2, px: 2.5 }}>
-          <Box
-            sx={{
-              position: 'relative',
-              p: 2,
-              borderRadius: 2,
-              overflow: 'hidden',
-              isolation: 'isolate',
-              background: `linear-gradient(145deg, ${alpha(
-                theme.palette.primary.main,
-                0.06
-              )} 0%, ${alpha(theme.palette.background.paper, 0.4)} 100%)`,
-              border: '1px solid rgba(255,255,255,0.06)',
-              '&::before': thumbnailUrl
-                ? {
-                    content: '""',
-                    position: 'absolute',
-                    inset: -40,
-                    backgroundImage: `url(${thumbnailUrl})`,
-                    backgroundSize: 'cover',
-                    backgroundPosition: 'center',
-                    filter: 'blur(32px) saturate(1.4)',
-                    opacity: 0.55,
-                    zIndex: -1,
-                  }
-                : undefined,
-              '&::after': thumbnailUrl
-                ? {
-                    content: '""',
-                    position: 'absolute',
-                    inset: 0,
-                    backgroundColor: alpha(theme.palette.background.paper, 0.45),
-                    zIndex: -1,
-                  }
-                : undefined,
-            }}
-          >
-            {video && (
-              <VideoInfoButton
-                video={video}
-                sx={{ position: 'absolute', top: 8, right: 8, zIndex: 1 }}
-              />
-            )}
-            <Box
-              sx={{
-                display: 'grid',
-                gridTemplateColumns: '140px minmax(0, 1fr)',
-                alignItems: 'center',
-                rowGap: 1.5,
-                columnGap: 2,
-                pr: video ? 5 : 0,
-                '& .MuiSelect-select': {
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                },
-                '& .MuiInputBase-root': { width: '100%' },
-              }}
-            >
-              {hasAudio && (
-                <>
-                  <FormLabel>Audio</FormLabel>
-                  <AudioSelector videoFile={video} onChange={setAudioSelection} />
-                </>
-              )}
-              <FormLabel>Subtitles</FormLabel>
-              <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center', minWidth: 0 }}>
-                <Box sx={{ flex: 1, minWidth: 0 }}>
-                  <SubtitlesSelector
-                    subFile={subs}
-                    videoFile={video}
-                    deviceType={props.device?.type}
-                    onChange={setSubtitlesSelection}
-                  />
-                </Box>
-                <Tooltip placement="top" title="Search subtitles online">
-                  <span>
-                    <IconButton size="small" disabled={!video} onClick={() => setSearchOpen(true)}>
-                      <ManageSearch fontSize="small" />
-                    </IconButton>
-                  </span>
-                </Tooltip>
-                <Tooltip placement="top" title="Preview and resync subtitles">
-                  <span>
-                    <IconButton
-                      size="small"
-                      disabled={!video || !syncableSelection}
-                      onClick={() => setSyncSource(syncableSelection)}
-                    >
-                      <AvTimer fontSize="small" />
-                    </IconButton>
-                  </span>
-                </Tooltip>
-              </Stack>
-              {showBurnToggle && (
-                <>
-                  <FormLabel>Burn into video</FormLabel>
-                  <Tooltip
-                    placement="top"
-                    enterDelay={300}
-                    title={
-                      forceBurn
-                        ? 'These subtitles are images (e.g. Blu-ray PGS) — they can only be shown by burning them into the video.'
-                        : 'Re-encodes the video to embed subtitles. Required only for older TVs that ignore sidecar captions.'
-                    }
-                  >
-                    <Box sx={{ justifySelf: 'start' }}>
-                      <Switch
-                        size="small"
-                        checked={effectiveBurn}
-                        disabled={forceBurn}
-                        onChange={(e) => setBurnSubtitles(e.target.checked)}
-                      />
-                    </Box>
-                  </Tooltip>
-                </>
-              )}
-            </Box>
-          </Box>
-        </AccordionDetails>
-      </Accordion>
+        )}
+      </Stack>
+
       {videoPath && (
         <>
           <SubtitleSearchDialog
@@ -621,59 +517,132 @@ export default function Dropper(props: Props): React.JSX.Element {
       </Snackbar>
       <Backdrop
         open={isOver}
-        sx={{
-          backgroundColor: alpha(theme.palette.primary.main, 0.15),
-          backdropFilter: 'blur(4px)',
+        sx={(theme) => ({
+          backgroundColor: 'rgba(11,12,20,0.7)',
+          backdropFilter: 'blur(6px)',
           flexDirection: 'column',
           gap: 2,
           zIndex: theme.zIndex.modal + 1,
-        }}
+        })}
       >
         <Box
           sx={{
-            width: 80,
-            height: 80,
+            width: 88,
+            height: 88,
             borderRadius: '50%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: alpha(theme.palette.primary.main, 0.2),
-            border: `2px dashed ${theme.palette.primary.light}`,
+            display: 'grid',
+            placeItems: 'center',
+            color: 'primary.main',
+            border: '2px dashed',
+            borderColor: 'primary.main',
+            bgcolor: 'rgba(94,242,192,0.1)',
           }}
         >
-          <VideoFile sx={{ fontSize: 40, color: theme.palette.primary.light }} />
+          <FileDownloadRounded sx={{ fontSize: 40 }} />
         </Box>
-        <Typography variant="h6" sx={{ color: theme.palette.primary.light, fontWeight: 600 }}>
-          Drop to load
-        </Typography>
+        <Typography variant="h2">Drop it here</Typography>
       </Backdrop>
     </Box>
   );
 }
 
-function FormLabel({ children }: { children: React.ReactNode }): React.JSX.Element {
+const linkSx = { fontSize: 13, fontWeight: 500, fontFamily: 'inherit' } as const;
+
+function TrackRow({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}): React.JSX.Element {
   return (
-    <Typography
-      variant="overline"
-      sx={{ color: 'text.secondary', lineHeight: 1, letterSpacing: 1 }}
-    >
-      {children}
-    </Typography>
+    <Stack direction="row" spacing={1.75} sx={{ alignItems: 'flex-start' }}>
+      <Typography sx={{ width: 82, flexShrink: 0, pt: 1, fontSize: 13, color: 'text.secondary' }}>
+        {label}
+      </Typography>
+      <Box sx={{ flex: 1, minWidth: 0 }}>{children}</Box>
+    </Stack>
   );
 }
 
-function CompatChip({ report }: { report: CompatReport }): React.JSX.Element {
-  const theme = useTheme();
+// Decorative: a few poster cards fanned out, the front one with a play button.
+function Illustration(): React.JSX.Element {
+  const card = {
+    position: 'absolute',
+    top: 34,
+    width: 150,
+    height: 100,
+    borderRadius: '16px',
+    boxShadow: '0 18px 40px rgba(0,0,0,0.45)',
+  } as const;
+  return (
+    <Box aria-hidden sx={{ position: 'relative', width: 300, height: 160, flexShrink: 0 }}>
+      <Box
+        sx={{
+          ...card,
+          left: 10,
+          transform: 'rotate(-12deg)',
+          background: 'linear-gradient(160deg, #FF8A5B 0%, #E5487A 55%, #5B2A86 100%)',
+        }}
+      />
+      <Box
+        sx={{
+          ...card,
+          right: 10,
+          transform: 'rotate(12deg)',
+          background: 'linear-gradient(160deg, #6FD3FF 0%, #2E6BE6 60%, #1A2A6B 100%)',
+        }}
+      />
+      <Box
+        sx={{
+          ...card,
+          top: 14,
+          left: 65,
+          width: 170,
+          height: 114,
+          borderRadius: '18px',
+          display: 'grid',
+          placeItems: 'center',
+          background:
+            'radial-gradient(120% 60% at 20% 20%, rgba(94,242,192,0.7), transparent 60%),' +
+            'radial-gradient(90% 50% at 85% 10%, rgba(181,108,245,0.7), transparent 60%),' +
+            'linear-gradient(180deg, #0A0F2C 0%, #162B5C 50%, #0B1622 100%)',
+          boxShadow: '0 24px 50px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.12)',
+        }}
+      >
+        <Box
+          sx={{
+            width: 44,
+            height: 44,
+            borderRadius: '50%',
+            bgcolor: 'rgba(255,255,255,0.92)',
+            color: '#0B0C14',
+            display: 'grid',
+            placeItems: 'center',
+          }}
+        >
+          <PlayArrowRounded />
+        </Box>
+      </Box>
+    </Box>
+  );
+}
+
+function CompatPill({
+  report,
+  deviceName,
+}: {
+  report: CompatReport;
+  deviceName: string;
+}): React.JSX.Element {
   const transcoding = report.needsTranscoding;
-  const accent = transcoding ? theme.palette.warning.main : theme.palette.success.main;
-  const accentLight = transcoding ? theme.palette.warning.light : theme.palette.success.light;
 
   return (
     <Tooltip
-      placement="top"
+      placement="bottom-start"
       enterDelay={200}
       title={
-        <Box sx={{ minWidth: 220 }}>
+        <Box sx={{ minWidth: 220, lineHeight: 1.5 }}>
           <Box sx={{ fontWeight: 600, fontSize: 13, mb: 0.75 }}>
             {transcoding ? 'Transcoding required' : 'Direct play'}
           </Box>
@@ -709,41 +678,35 @@ function CompatChip({ report }: { report: CompatReport }): React.JSX.Element {
           )}
         </Box>
       }
-      slotProps={{
-        tooltip: {
-          sx: {
-            backgroundColor: alpha(theme.palette.background.paper, 0.98),
-            color: theme.palette.text.primary,
-            border: '1px solid rgba(255,255,255,0.08)',
-            borderRadius: 1.5,
-            padding: '10px 12px',
-            maxWidth: 360,
-            lineHeight: 1.5,
-            boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
-            backdropFilter: 'blur(8px)',
-          },
-        },
-      }}
     >
-      <Box
-        component="span"
+      <Stack
+        direction="row"
+        spacing={0.75}
         sx={{
-          flexShrink: 0,
-          mr: 1,
-          width: 24,
-          height: 24,
-          borderRadius: '50%',
-          display: 'inline-flex',
+          height: 28,
+          px: 1.5,
+          mr: 0.5,
           alignItems: 'center',
-          justifyContent: 'center',
-          color: accentLight,
-          backgroundColor: alpha(accent, 0.12),
-          border: `1px solid ${alpha(accent, 0.35)}`,
+          borderRadius: 999,
+          bgcolor: 'rgba(255,255,255,0.1)',
+          fontSize: 12,
+          color: '#E4E6F0',
           cursor: 'help',
+          minWidth: 0,
         }}
       >
-        {transcoding ? <Memory sx={{ fontSize: 14 }} /> : <Bolt sx={{ fontSize: 14 }} />}
-      </Box>
+        {transcoding ? (
+          <AutoAwesomeRounded sx={{ fontSize: 14 }} />
+        ) : (
+          <BoltRounded sx={{ fontSize: 14, color: 'primary.main' }} />
+        )}
+        <Box
+          component="span"
+          sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+        >
+          {transcoding ? `We’ll convert it for ${deviceName}` : `Plays directly on ${deviceName}`}
+        </Box>
+      </Stack>
     </Tooltip>
   );
 }
@@ -753,14 +716,7 @@ function extensionOf(name: string): string {
   return idx >= 0 ? name.slice(idx).toLowerCase() : '';
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ['KB', 'MB', 'GB', 'TB'];
-  let value = bytes / 1024;
-  let unitIndex = 0;
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024;
-    unitIndex++;
-  }
-  return `${value.toFixed(value < 10 ? 1 : 0)} ${units[unitIndex]}`;
+function stripExtension(name: string): string {
+  const idx = name.lastIndexOf('.');
+  return idx > 0 ? name.slice(0, idx) : name;
 }

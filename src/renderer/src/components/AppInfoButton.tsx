@@ -29,7 +29,7 @@ export default function AppInfoButton(): React.JSX.Element {
         size="small"
         sx={{
           appRegion: 'no-drag',
-          color: 'white',
+          color: 'text.secondary',
           // AppBar is only 32px tall — shrink the IconButton's default padding so the icon fits.
           padding: '4px',
         }}

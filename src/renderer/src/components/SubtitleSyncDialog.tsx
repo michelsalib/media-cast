@@ -1,29 +1,32 @@
-import { Close, Forward10, Pause, PlayArrow, Replay10, RestartAlt } from '@mui/icons-material';
+import {
+  AddRounded,
+  ArrowBackRounded,
+  Forward10Rounded,
+  PauseRounded,
+  PlayArrowRounded,
+  RemoveRounded,
+  Replay10Rounded,
+} from '@mui/icons-material';
 import {
   Alert,
   Box,
   Button,
-  ButtonGroup,
+  ButtonBase,
   CircularProgress,
   Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
   IconButton,
-  List,
-  ListItemButton,
-  ListItemText,
+  Link,
   MenuItem,
   Select,
   Slider,
   Stack,
-  Tooltip,
   Typography,
 } from '@mui/material';
 import format from 'format-duration';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SubtitleCue, SubtitleTiming } from '../../../shared/subtitleSearch';
 import { api, errorMessage } from '../ipc';
+import { glassSx } from '../theme';
 import type { SubtitlesFile } from './SubtitlesSelection';
 
 export type SyncSource = { name: string; pathOrIndex: string | number };
@@ -76,6 +79,7 @@ export default function SubtitleSyncDialog({
   const [timing, setTiming] = useState<SubtitleTiming>(NO_TIMING);
   const [error, setError] = useState<string | undefined>();
   const [applying, setApplying] = useState(false);
+  const [showRateFix, setShowRateFix] = useState(false);
 
   const open = !!source;
   const duration = preview?.duration ?? 0;
@@ -86,6 +90,7 @@ export default function SubtitleSyncDialog({
     let cancelled = false;
     setError(undefined);
     setTiming(NO_TIMING);
+    setShowRateFix(false);
     setPlaying(false);
     setSrc(undefined);
     Promise.all([
@@ -203,196 +208,305 @@ export default function SubtitleSyncDialog({
       .finally(() => setApplying(false));
   }
 
+  const offsetWord = timing.offset > 0 ? 'later' : timing.offset < 0 ? 'earlier' : 'on time';
+
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
-      <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1, pr: 1 }}>
+    <Dialog
+      open={open}
+      onClose={onClose}
+      fullScreen
+      slotProps={{
+        paper: {
+          sx: {
+            borderRadius: 0,
+            border: 0,
+            backgroundColor: '#0B0C14',
+            backgroundImage:
+              'radial-gradient(600px 360px at 10% 25%, rgba(46,95,138,0.35), transparent 70%),' +
+              'radial-gradient(380px 300px at 95% 55%, rgba(122,76,245,0.25), transparent 70%)',
+          },
+        },
+      }}
+    >
+      {/* The window's title bar area: keep it draggable, the system controls sit over it. */}
+      <Box sx={{ height: 32, flexShrink: 0, appRegion: 'drag' }} />
+
+      <Stack direction="row" spacing={1.75} sx={{ alignItems: 'center', px: 4, pt: 1.5, pb: 2.25 }}>
+        <IconButton onClick={onClose} aria-label="Back" sx={glassSx}>
+          <ArrowBackRounded />
+        </IconButton>
         <Box sx={{ flex: 1, minWidth: 0 }}>
-          Check subtitle sync
-          <Typography noWrap variant="body2" sx={{ color: 'text.secondary' }}>
+          <Typography variant="h1" sx={{ fontSize: 26 }}>
+            Are the subtitles in time?
+          </Typography>
+          <Typography noWrap sx={{ fontSize: 12, color: '#9DA2B8' }}>
             {source?.name}
           </Typography>
         </Box>
-        <IconButton onClick={onClose} aria-label="close">
-          <Close />
-        </IconButton>
-      </DialogTitle>
-      <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-        <Box
-          sx={{
-            position: 'relative',
-            // A flex child shrinks to whatever height is left; the controls below
-            // should scroll instead. The cap keeps them reachable on short windows.
-            flexShrink: 0,
-            aspectRatio: '16 / 9',
-            maxHeight: '62vh',
-            backgroundColor: 'black',
-            borderRadius: 1,
-            overflow: 'hidden',
-          }}
+        <Button
+          variant="contained"
+          onClick={apply}
+          disabled={applying || !src}
+          startIcon={applying ? <CircularProgress size={16} color="inherit" /> : undefined}
+          sx={{ height: 46, px: 3, fontSize: 15, fontWeight: 700 }}
         >
-          {src && (
-            <video
-              ref={videoRef}
-              src={src}
-              onPlay={() => setPlaying(true)}
-              onPause={() => setPlaying(false)}
-              onWaiting={() => setBuffering(true)}
-              onPlaying={() => setBuffering(false)}
-              onCanPlay={(e) => {
-                setBuffering(false);
-                if (resumeAfterLoad.current) {
-                  resumeAfterLoad.current = false;
-                  void e.currentTarget.play().catch(() => {});
-                }
-              }}
-              onLoadStart={() => setBuffering(true)}
-              onTimeUpdate={(e) => !playing && setTime(base + e.currentTarget.currentTime)}
-              onError={onVideoError}
-              style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
-            >
-              <track kind="captions" />
-            </video>
-          )}
-          {(!src || buffering) && !error && (
-            <CircularProgress
-              sx={{ position: 'absolute', top: '50%', left: '50%', mt: -2.5, ml: -2.5 }}
-            />
-          )}
-          {activeCue && (
-            <Typography
-              sx={{
-                position: 'absolute',
-                left: '5%',
-                right: '5%',
-                bottom: '6%',
-                textAlign: 'center',
-                whiteSpace: 'pre-line',
-                color: 'white',
-                fontSize: 'clamp(14px, 2.6vw, 22px)',
-                fontWeight: 500,
-                textShadow: '0 0 4px black, 0 0 2px black, 1px 1px 2px black',
-                pointerEvents: 'none',
-              }}
-            >
-              {activeCue.text}
-            </Typography>
-          )}
-        </Box>
+          {changed ? 'Use new timing' : 'Looks good'}
+        </Button>
+      </Stack>
 
-        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-          <IconButton onClick={togglePlay} disabled={!src}>
-            {playing ? <Pause /> : <PlayArrow />}
-          </IconButton>
-          <IconButton onClick={() => seek(time - 10)} disabled={!src} size="small">
-            <Replay10 />
-          </IconButton>
-          <IconButton onClick={() => seek(time + 10)} disabled={!src} size="small">
-            <Forward10 />
-          </IconButton>
-          <Slider
-            size="small"
-            min={0}
-            max={duration || 1}
-            value={Math.min(time, duration || 1)}
-            onChange={(_e, v) => setTime(v as number)}
-            onChangeCommitted={(_e, v) => seek(v as number)}
-            disabled={!src}
-            sx={{ mx: 1 }}
-          />
-          <Typography
-            variant="caption"
-            sx={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}
+      <Stack direction="row" spacing={2.5} sx={{ flex: 1, minHeight: 0, px: 4, pb: 3 }}>
+        <Stack spacing={1.5} sx={{ flex: 1, minWidth: 0, minHeight: 0, overflowY: 'auto' }}>
+          <Box
+            sx={{
+              position: 'relative',
+              // A flex child shrinks to whatever height is left; the controls below
+              // should scroll instead. The cap keeps them reachable on short windows.
+              flexShrink: 0,
+              aspectRatio: '16 / 9',
+              maxHeight: '52vh',
+              backgroundColor: 'black',
+              borderRadius: '18px',
+              overflow: 'hidden',
+              boxShadow: '0 24px 60px rgba(0,0,0,0.5)',
+            }}
           >
-            {format(time * 1000)} / {format(duration * 1000)}
-          </Typography>
-        </Stack>
-
-        <Box sx={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 2 }}>
-          <Stack spacing={1.5}>
-            <Typography variant="overline" sx={{ color: 'text.secondary', lineHeight: 1 }}>
-              Delay
-            </Typography>
-            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-              <ButtonGroup size="small" variant="outlined">
-                <Button onClick={() => nudge(-1)}>−1s</Button>
-                <Button onClick={() => nudge(-0.1)}>−0.1</Button>
-              </ButtonGroup>
+            {src && (
+              <video
+                ref={videoRef}
+                src={src}
+                onPlay={() => setPlaying(true)}
+                onPause={() => setPlaying(false)}
+                onWaiting={() => setBuffering(true)}
+                onPlaying={() => setBuffering(false)}
+                onCanPlay={(e) => {
+                  setBuffering(false);
+                  if (resumeAfterLoad.current) {
+                    resumeAfterLoad.current = false;
+                    void e.currentTarget.play().catch(() => {});
+                  }
+                }}
+                onLoadStart={() => setBuffering(true)}
+                onTimeUpdate={(e) => !playing && setTime(base + e.currentTarget.currentTime)}
+                onError={onVideoError}
+                style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+              >
+                <track kind="captions" />
+              </video>
+            )}
+            {(!src || buffering) && !error && (
+              <CircularProgress
+                sx={{ position: 'absolute', top: '50%', left: '50%', mt: -2.5, ml: -2.5 }}
+              />
+            )}
+            {activeCue && (
               <Typography
                 sx={{
-                  minWidth: 64,
+                  position: 'absolute',
+                  left: '5%',
+                  right: '5%',
+                  bottom: '7%',
                   textAlign: 'center',
-                  fontVariantNumeric: 'tabular-nums',
-                  fontWeight: 600,
+                  whiteSpace: 'pre-line',
+                  color: 'white',
+                  fontSize: 'clamp(14px, 2.4vw, 22px)',
+                  fontWeight: 500,
+                  textShadow: '0 0 4px black, 0 0 2px black, 1px 1px 2px black',
+                  pointerEvents: 'none',
                 }}
               >
-                {timing.offset > 0 ? '+' : ''}
-                {timing.offset.toFixed(1)}s
+                {activeCue.text}
               </Typography>
-              <ButtonGroup size="small" variant="outlined">
-                <Button onClick={() => nudge(0.1)}>+0.1</Button>
-                <Button onClick={() => nudge(1)}>+1s</Button>
-              </ButtonGroup>
-              <Tooltip title="Reset">
-                <span>
-                  <IconButton size="small" onClick={() => setTiming(NO_TIMING)} disabled={!changed}>
-                    <RestartAlt fontSize="small" />
-                  </IconButton>
-                </span>
-              </Tooltip>
-            </Stack>
-            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-              + shows subtitles later, − earlier.
-            </Typography>
-            <Select
-              size="small"
-              value={timing.ratio}
-              onChange={(e) => setTiming((t) => ({ ...t, ratio: Number(e.target.value) }))}
+            )}
+          </Box>
+
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+            <IconButton
+              onClick={togglePlay}
+              disabled={!src}
+              aria-label={playing ? 'Pause' : 'Play'}
+              sx={{ bgcolor: '#FFFFFF', color: '#0B0C14', '&:hover': { bgcolor: '#E8EAF2' } }}
             >
-              {FRAME_RATE_FIXES.map((f) => (
-                <MenuItem key={f.label} value={f.ratio}>
-                  {f.label}
-                </MenuItem>
-              ))}
-            </Select>
-            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-              Use a frame rate fix when subtitles drift further off as the video goes on.
+              {playing ? <PauseRounded /> : <PlayArrowRounded />}
+            </IconButton>
+            <IconButton
+              onClick={() => seek(time - 10)}
+              disabled={!src}
+              aria-label="Back 10 seconds"
+            >
+              <Replay10Rounded />
+            </IconButton>
+            <IconButton
+              onClick={() => seek(time + 10)}
+              disabled={!src}
+              aria-label="Forward 10 seconds"
+            >
+              <Forward10Rounded />
+            </IconButton>
+            <Slider
+              size="small"
+              aria-label="Position"
+              min={0}
+              max={duration || 1}
+              value={Math.min(time, duration || 1)}
+              onChange={(_e, v) => setTime(v as number)}
+              onChangeCommitted={(_e, v) => seek(v as number)}
+              disabled={!src}
+              sx={{
+                mx: 1.5,
+                color: '#FFFFFF',
+                '& .MuiSlider-rail': { bgcolor: 'rgba(255,255,255,0.15)', opacity: 1 },
+              }}
+            />
+            <Typography
+              sx={{
+                fontSize: 12,
+                color: 'text.secondary',
+                whiteSpace: 'nowrap',
+                fontVariantNumeric: 'tabular-nums',
+              }}
+            >
+              {format(time * 1000)} / {format(duration * 1000)}
             </Typography>
           </Stack>
 
-          <Stack spacing={0.5} sx={{ minWidth: 0 }}>
-            <Typography variant="overline" sx={{ color: 'text.secondary', lineHeight: 1 }}>
-              Sync on a line
-            </Typography>
-            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-              Pause right when a line is spoken, then click it.
-            </Typography>
-            <List dense disablePadding>
-              {nearby.map((c) => (
-                <ListItemButton
-                  key={`${c.start}-${c.text}`}
-                  selected={c === activeCue}
-                  onClick={() => alignToNow(c)}
-                  sx={{ borderRadius: 1, py: 0.25 }}
+          <Stack
+            direction="row"
+            spacing={2}
+            sx={{
+              alignItems: 'center',
+              px: 2.25,
+              py: 1.5,
+              borderRadius: '20px',
+              bgcolor: 'rgba(255,255,255,0.07)',
+              flexShrink: 0,
+            }}
+          >
+            <Typography sx={{ color: 'text.secondary' }}>Subtitles show</Typography>
+            <Stack
+              direction="row"
+              spacing={1.25}
+              sx={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}
+            >
+              <Button
+                onClick={() => nudge(-1)}
+                sx={{ ...glassSx, minWidth: 0, px: 1.25, height: 32 }}
+              >
+                −1 s
+              </Button>
+              <IconButton
+                onClick={() => nudge(-0.1)}
+                aria-label="Earlier by 0.1 second"
+                sx={glassSx}
+              >
+                <RemoveRounded />
+              </IconButton>
+              <Stack sx={{ minWidth: 104, alignItems: 'center' }}>
+                <Typography
+                  sx={{
+                    fontSize: 26,
+                    fontWeight: 700,
+                    lineHeight: 1.1,
+                    color: changed ? 'primary.main' : 'text.primary',
+                    fontVariantNumeric: 'tabular-nums',
+                  }}
                 >
-                  <ListItemText
-                    primary={c.text.replace(/\n/g, ' ')}
-                    secondary={format(shown(c).start * 1000)}
-                    slotProps={{ primary: { noWrap: true } }}
-                  />
-                </ListItemButton>
-              ))}
-            </List>
+                  {Math.abs(timing.offset).toFixed(1)} s
+                </Typography>
+                <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>{offsetWord}</Typography>
+              </Stack>
+              <IconButton onClick={() => nudge(0.1)} aria-label="Later by 0.1 second" sx={glassSx}>
+                <AddRounded />
+              </IconButton>
+              <Button
+                onClick={() => nudge(1)}
+                sx={{ ...glassSx, minWidth: 0, px: 1.25, height: 32 }}
+              >
+                +1 s
+              </Button>
+            </Stack>
+            <Link
+              component="button"
+              onClick={() => setTiming(NO_TIMING)}
+              disabled={!changed}
+              sx={{
+                fontSize: 13,
+                fontFamily: 'inherit',
+                visibility: changed ? 'visible' : 'hidden',
+              }}
+            >
+              Reset
+            </Link>
           </Stack>
-        </Box>
 
-        {error && <Alert severity="error">{error}</Alert>}
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose}>Back</Button>
-        <Button variant="contained" onClick={apply} disabled={applying || !src}>
-          {changed ? 'Use resynced subtitles' : 'Use these subtitles'}
-        </Button>
-      </DialogActions>
+          {showRateFix || timing.ratio !== 1 ? (
+            <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', flexShrink: 0 }}>
+              <Select
+                size="small"
+                value={timing.ratio}
+                onChange={(e) => setTiming((t) => ({ ...t, ratio: Number(e.target.value) }))}
+                sx={{ minWidth: 200 }}
+              >
+                {FRAME_RATE_FIXES.map((f) => (
+                  <MenuItem key={f.label} value={f.ratio}>
+                    {f.label}
+                  </MenuItem>
+                ))}
+              </Select>
+              <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>
+                For subtitles that drift further off as the video goes on.
+              </Typography>
+            </Stack>
+          ) : (
+            <Link
+              component="button"
+              onClick={() => setShowRateFix(true)}
+              sx={{ alignSelf: 'flex-start', fontSize: 13, fontFamily: 'inherit' }}
+            >
+              Getting worse as it plays? Fix the frame rate
+            </Link>
+          )}
+
+          {error && <Alert severity="error">{error}</Alert>}
+        </Stack>
+
+        <Stack spacing={1.25} sx={{ width: 270, flexShrink: 0, minHeight: 0 }}>
+          <Typography sx={{ color: 'text.secondary', lineHeight: 1.4 }}>
+            Or pause right as someone speaks, then tap that line:
+          </Typography>
+          <Stack spacing={0.75} sx={{ overflowY: 'auto', minHeight: 0 }}>
+            {nearby.map((c) => {
+              const current = c === activeCue;
+              return (
+                <ButtonBase
+                  key={`${c.start}-${c.text}`}
+                  onClick={() => alignToNow(c)}
+                  sx={{
+                    display: 'block',
+                    textAlign: 'left',
+                    px: 1.75,
+                    py: current ? 1.5 : 1.25,
+                    borderRadius: '16px',
+                    fontSize: current ? 14 : 13,
+                    fontWeight: current ? 600 : 400,
+                    color: current ? '#0B0C14' : '#E4E6F0',
+                    bgcolor: current ? '#FFFFFF' : 'rgba(255,255,255,0.08)',
+                    boxShadow: current ? '0 10px 24px rgba(0,0,0,0.35)' : 'none',
+                    '&:hover': { bgcolor: current ? '#FFFFFF' : 'rgba(255,255,255,0.14)' },
+                  }}
+                >
+                  <Box
+                    component="span"
+                    sx={{ display: 'block', fontSize: 11, opacity: 0.6, mb: 0.25 }}
+                  >
+                    {format(shown(c).start * 1000)}
+                  </Box>
+                  {c.text.replace(/\n/g, ' ')}
+                </ButtonBase>
+              );
+            })}
+          </Stack>
+        </Stack>
+      </Stack>
     </Dialog>
   );
 }

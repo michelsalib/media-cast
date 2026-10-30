@@ -76,10 +76,12 @@ DLNA `protocolInfo` / `contentFeatures.dlna.org` values live in [upnp/dlna.ts](s
 
 State is flat — `useState` only, ownership by component:
 
-- [App.tsx](src/renderer/src/App.tsx) — `connectedDevice`; toggles `<Connector>` vs `<Player>`. Theme defined inline here.
-- [Connector.tsx](src/renderer/src/components/Connector.tsx) — subscribes `onEvent('scan')` and triggers an initial `refresh` on mount; owns `DISCONNECTED → LOADING → CONNECTED`.
-- [Player.tsx](src/renderer/src/components/Player.tsx) — subscribes `onEvent('status')`. The 1s ticker that drives between player-side status events lives in [PlaybackController](src/main/PlaybackController.ts), not the renderer.
-- [Dropper.tsx](src/renderer/src/components/Dropper.tsx) — drag-and-drop ingestion. Discriminator is filename suffix: `.mp4`/`.mkv`/`.avi` → video, `.srt`/`.vtt`/`.ass`/`.ssa` → subs, anything else is rejected with a message. AVI is UPnP-only (direct play if the Sink lists it, else transcode); a Chromecast load of an AVI throws. Thumbnail regenerated per video via `api.thumbnail`.
+- [App.tsx](src/renderer/src/App.tsx) — owns the `Connection` (`{ device, state: CONNECTING | CONNECTED | DISCONNECTED }`) and `connect`/`stop`; draws the title bar over `<Dropper>`. Stop is `api.disconnect()` (there is no stop call) but the device stays picked, so Play reconnects to it. Theme and the shared `pillSx`/`glassSx` live in [theme.ts](src/renderer/src/theme.ts); Outfit is bundled via `@fontsource/outfit` (the CSP blocks font CDNs).
+- [Connector.tsx](src/renderer/src/components/Connector.tsx) — the device tiles. Subscribes `onEvent('scan')` and triggers an initial `refresh` on mount; a click calls App's `connect`. Keeps the picked device listed when a scan drops it.
+- [Dropper.tsx](src/renderer/src/components/Dropper.tsx) — the whole window below the title bar: views `empty` / `ready` / `playing`, the blurred-thumbnail backdrop, drag-and-drop ingestion, and subscribes `onEvent('status')`. Discriminator is filename suffix: `.mp4`/`.mkv`/`.avi` → video, `.srt`/`.vtt`/`.ass`/`.ssa` → subs, anything else is rejected with a message. AVI is UPnP-only (direct play if the Sink lists it, else transcode); a Chromecast load of an AVI throws. Thumbnail regenerated per video via `api.thumbnail`; the heading comes from `api.guessSubtitleQuery` (release-name parse), with the file name in Details.
+- [Player.tsx](src/renderer/src/components/Player.tsx) — the now-playing view, props only. The 1s ticker that drives between player-side status events lives in [PlaybackController](src/main/PlaybackController.ts), not the renderer.
+
+Labels shown to users are plain words ([labels.ts](src/renderer/src/labels.ts): language names, "5.1", "Full HD", "52 min"); codecs, containers and IPs stay in `VideoInfoButton`, the compat tooltip and tile hover titles.
 
 [SubtitlesSelection.ts](src/renderer/src/components/SubtitlesSelection.ts) is a 3-arm union (`internal` / `external` / `no subtitles`); [SubtitlesSelector.tsx](src/renderer/src/components/SubtitlesSelector.tsx) builds choices from `api.probe` + the optional sidecar, auto-selects `external > internal > none`. Dropper maps it to the `load` call's `subtitlesPathOrIndex` (string | number | undefined) — that's what main keys on for burn-in vs sidecar.
 

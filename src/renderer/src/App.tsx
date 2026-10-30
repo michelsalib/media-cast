@@ -1,131 +1,92 @@
-import {
-  AppBar,
-  Collapse,
-  createTheme,
-  Stack,
-  ThemeProvider,
-  Toolbar,
-  Typography,
-} from '@mui/material';
+import { Alert, Box, Snackbar, Stack, ThemeProvider, Typography } from '@mui/material';
 import CssBaseline from '@mui/material/CssBaseline';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import type { Device } from '../../shared/types';
 import AppInfoButton from './components/AppInfoButton';
 import { Connector } from './components/Connector';
 import Dropper from './components/Dropper';
-import Player from './components/Player';
 import UpdateButton from './components/UpdateButton';
+import { api, errorMessage } from './ipc';
+import { theme } from './theme';
 
-const darkTheme = createTheme({
-  palette: {
-    mode: 'dark',
-    primary: {
-      main: '#7c4dff',
-      light: '#b39dff',
-      dark: '#4d2c99',
-    },
-    secondary: {
-      main: '#22d3ee',
-    },
-    background: {
-      default: '#0e0b1a',
-      paper: '#161229',
-    },
-  },
-  shape: {
-    borderRadius: 10,
-  },
-  typography: {
-    fontFamily:
-      '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-  },
-  components: {
-    MuiCssBaseline: {
-      styleOverrides: {
-        '*::-webkit-scrollbar': {
-          width: 8,
-          height: 8,
-        },
-        '*::-webkit-scrollbar-track': {
-          background: 'transparent',
-        },
-        '*::-webkit-scrollbar-thumb': {
-          background: 'rgba(255,255,255,0.15)',
-          borderRadius: 4,
-        },
-        '*::-webkit-scrollbar-thumb:hover': {
-          background: 'rgba(255,255,255,0.25)',
-        },
-      },
-    },
-  },
-});
+// The picked device stays picked after Stop (DISCONNECTED), so Play can reconnect to it.
+export type Connection = {
+  device: Device;
+  state: 'CONNECTING' | 'CONNECTED' | 'DISCONNECTED';
+};
 
 function App(): React.JSX.Element {
-  const [connectedDevice, setConnectedDevice] = useState<Device | null>(null);
-  const connected = connectedDevice !== null;
+  const [connection, setConnection] = useState<Connection | null>(null);
+  const [connectError, setConnectError] = useState<string | undefined>();
+
+  const connect = useCallback(async (device: Device): Promise<boolean> => {
+    setConnectError(undefined);
+    setConnection({ device, state: 'CONNECTING' });
+    try {
+      await api.connect(device.id);
+      setConnection({ device, state: 'CONNECTED' });
+      return true;
+    } catch (err) {
+      setConnection({ device, state: 'DISCONNECTED' });
+      setConnectError(errorMessage(err));
+      return false;
+    }
+  }, []);
+
+  const stop = useCallback((): void => {
+    void api.disconnect();
+    setConnection((c) => c && { ...c, state: 'DISCONNECTED' });
+  }, []);
 
   return (
-    <ThemeProvider theme={darkTheme}>
+    <ThemeProvider theme={theme}>
       <CssBaseline>
-        <Stack
-          sx={{
-            height: '100%',
-            background:
-              'radial-gradient(1200px 600px at 0% 0%, rgba(124,77,255,0.18), transparent 60%),' +
-              'radial-gradient(900px 500px at 100% 100%, rgba(34,211,238,0.10), transparent 60%),' +
-              '#0e0b1a',
-          }}
-        >
-          <AppBar
-            position="relative"
-            elevation={0}
+        <Box sx={{ height: '100%', position: 'relative' }}>
+          <Dropper
+            connection={connection}
+            onConnect={connect}
+            onStop={stop}
+            devices={(label) => (
+              <Connector
+                label={label}
+                connection={connection}
+                onSelect={(device) => void connect(device)}
+              />
+            )}
+          />
+          <Stack
+            direction="row"
             sx={{
+              position: 'absolute',
+              top: 0,
+              zIndex: 2,
+              alignItems: 'center',
               appRegion: 'drag',
-              background: 'transparent',
-              backgroundImage: 'none',
-              borderBottom: '1px solid rgba(255,255,255,0.06)',
+              height: 32,
+              pl: 2,
+              pr: 1,
+              // Sized to the draggable area so icons sit flush against the system
+              // window controls without overlap (controls live outside this width).
+              width: 'env(titlebar-area-width, 100%)',
+              left: 'env(titlebar-area-x, 0px)',
             }}
           >
-            <Toolbar
-              variant="dense"
-              disableGutters
-              sx={{
-                minHeight: 'inherit',
-                height: '32px',
-                paddingLeft: 3,
-                paddingRight: 1,
-                // Sized to the draggable area so icons sit flush against the system
-                // window controls without overlap (controls live outside this width).
-                // disableGutters drops the default 24px right padding; we add a small
-                // one back so the icons aren't crammed against the system controls.
-                width: 'env(titlebar-area-width, 100%)',
-                marginLeft: 'env(titlebar-area-x, 0px)',
-              }}
-            >
-              <Typography variant="h6" sx={{ fontSize: 12, flexGrow: 1 }}>
-                Media Cast
-              </Typography>
-              <UpdateButton />
-              <AppInfoButton />
-            </Toolbar>
-          </AppBar>
-          <Dropper device={connectedDevice}>
-            <Stack spacing={5} sx={{ margin: 5 }}>
-              <Collapse in={!connected} unmountOnExit>
-                <Connector
-                  onChange={(s, device) => setConnectedDevice(s === 'CONNECTED' ? device : null)}
-                ></Connector>
-              </Collapse>
-              <Collapse in={connected}>
-                <Player
-                  device={connectedDevice}
-                  onDisconnect={() => setConnectedDevice(null)}
-                ></Player>
-              </Collapse>
-            </Stack>
-          </Dropper>
-        </Stack>
+            <Typography sx={{ fontSize: 12, fontWeight: 600, opacity: 0.85, flexGrow: 1 }}>
+              Media Cast
+            </Typography>
+            <UpdateButton />
+            <AppInfoButton />
+          </Stack>
+          <Snackbar
+            open={!!connectError}
+            onClose={() => setConnectError(undefined)}
+            anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+          >
+            <Alert severity="error" variant="filled" onClose={() => setConnectError(undefined)}>
+              Could not connect: {connectError}
+            </Alert>
+          </Snackbar>
+        </Box>
       </CssBaseline>
     </ThemeProvider>
   );

@@ -1,6 +1,8 @@
-import { MenuItem, Select } from '@mui/material';
+import { Button, Stack } from '@mui/material';
 import { useEffect, useState } from 'react';
 import { api, pathFor } from '../ipc';
+import { channelsLabel, languageName } from '../labels';
+import { pillSx } from '../theme';
 import type { AudioSelection } from './AudioSelection';
 
 type Props = {
@@ -28,7 +30,10 @@ export default function AudioSelector({ videoFile, onChange }: Props): React.JSX
         .map(
           (s, i): AudioSelection => ({
             index: i,
-            name: formatLangTitle(s.tags?.language, s.tags?.title) ?? `Track ${i + 1}`,
+            name:
+              [languageName(s.tags?.language) ?? s.tags?.title, channelsLabel(s.channels)]
+                .filter(Boolean)
+                .join(' · ') || `Track ${i + 1}`,
           })
         );
 
@@ -56,27 +61,20 @@ export default function AudioSelector({ videoFile, onChange }: Props): React.JSX
   }
 
   return (
-    <Select
-      variant="standard"
-      value={choice?.index ?? 0}
-      onChange={(e) => {
-        const next = choices.find((c) => c.index === Number(e.target.value));
-        if (next) {
-          setChoice(next);
-        }
-      }}
-    >
-      {choices.map((c) => (
-        <MenuItem key={c.index} value={c.index}>
-          {c.name}
-        </MenuItem>
-      ))}
-    </Select>
+    <Stack direction="row" useFlexGap sx={{ gap: 1, flexWrap: 'wrap' }}>
+      {choices.map((c) => {
+        const selected = c.index === choice?.index;
+        return (
+          <Button
+            key={c.index}
+            aria-pressed={selected}
+            onClick={() => setChoice(c)}
+            sx={pillSx(selected)}
+          >
+            {c.name}
+          </Button>
+        );
+      })}
+    </Stack>
   );
-}
-
-function formatLangTitle(language?: string, title?: string): string | undefined {
-  const lang = language ? language.toUpperCase() : undefined;
-  if (lang && title) return `${lang} · ${title}`;
-  return lang ?? title;
 }

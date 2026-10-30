@@ -1,279 +1,176 @@
-import { Cast, CheckCircle, Refresh, Tv } from '@mui/icons-material';
+import { Cast, CheckRounded, Tv } from '@mui/icons-material';
 import {
-  Alert,
-  alpha,
   Box,
-  Card,
-  CardActionArea,
-  Chip,
+  Button,
+  ButtonBase,
   CircularProgress,
-  IconButton,
   keyframes,
   Stack,
   Typography,
-  useTheme,
 } from '@mui/material';
 import { useEffect, useState } from 'react';
 import type { Device } from '../../../shared/types';
-import { api, errorMessage, onEvent } from '../ipc';
+import type { Connection } from '../App';
+import { api, onEvent } from '../ipc';
 
 type Props = {
-  onChange?: (state: ConnectorState, device: Device | null) => void;
+  label: string;
+  connection: Connection | null;
+  onSelect: (device: Device) => void;
 };
 
-type ConnectorState = 'DISCONNECTED' | 'CONNECTED' | 'LOADING';
-
 const pulse = keyframes`
-  0%   { transform: scale(1);   opacity: 1;   }
-  70%  { transform: scale(2.2); opacity: 0;   }
-  100% { transform: scale(2.2); opacity: 0;   }
+  0%   { box-shadow: 0 0 0 0   rgba(94,242,192,0.45); }
+  70%  { box-shadow: 0 0 0 8px rgba(94,242,192,0);    }
+  100% { box-shadow: 0 0 0 0   rgba(94,242,192,0);    }
 `;
 
-const float = keyframes`
-  0%, 100% { transform: translateY(0); }
-  50%      { transform: translateY(-2px); }
-`;
+const ICON_BACKGROUNDS: Record<Device['type'], string> = {
+  upnp: 'linear-gradient(160deg, #6FD3FF, #2E6BE6)',
+  chromecast: 'linear-gradient(160deg, #FF8A5B, #E5487A)',
+};
 
-const spin = keyframes`
-  to { transform: rotate(360deg); }
-`;
-
-export function Connector({ onChange }: Props): React.JSX.Element {
+export function Connector({ label, connection, onSelect }: Props): React.JSX.Element {
   const [devices, setDevices] = useState<Device[]>([]);
-  const [state, setState] = useState<ConnectorState>('DISCONNECTED');
-  const [connectedId, setConnectedId] = useState<string | null>(null);
-  // The device as it was when connected. Scans drop a TV that misses a few SSDP replies
-  // (LG does) — that must not bounce the app back to this list mid-session.
-  const [connectedDevice, setConnectedDevice] = useState<Device | null>(null);
-  const [error, setError] = useState<string | undefined>();
   const [scanning, setScanning] = useState(false);
-  const theme = useTheme();
-
-  function refresh(): void {
-    void api.refresh();
-    setScanning(true);
-    setTimeout(() => setScanning(false), 800);
-  }
 
   useEffect(() => {
     void api.refresh();
     return onEvent('scan', setDevices);
   }, []);
 
-  useEffect(() => {
-    const device = devices.find((d) => d.id === connectedId) ?? connectedDevice;
-    onChange?.(state, device);
-  }, [state, connectedId, connectedDevice, devices, onChange]);
-
-  async function connect(id: string): Promise<void> {
-    if (state === 'LOADING') {
-      return;
-    }
-
-    try {
-      setError(undefined);
-      setConnectedId(id);
-      setConnectedDevice(devices.find((d) => d.id === id) ?? null);
-      setState('LOADING');
-      await api.connect(id);
-      setState('CONNECTED');
-    } catch (err) {
-      setConnectedId(null);
-      setConnectedDevice(null);
-      setState('DISCONNECTED');
-      setError(errorMessage(err));
-    }
+  function refresh(): void {
+    void api.refresh();
+    setScanning(true);
+    setTimeout(() => setScanning(false), 1500);
   }
 
+  // Scans drop a TV that misses a few SSDP replies (LG does) — the picked one must
+  // stay on screen mid-session.
+  const picked = connection?.device;
+  const shown = picked && !devices.some((d) => d.id === picked.id) ? [picked, ...devices] : devices;
+  const busy = connection?.state === 'CONNECTING';
+
   return (
-    <Stack spacing={3}>
-      <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
+    <Stack spacing={1.25} sx={{ minWidth: 0 }}>
+      <Stack direction="row" spacing={1} sx={{ alignItems: 'center', height: 30 }}>
+        <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>{label}</Typography>
         <Box
           sx={{
-            position: 'relative',
-            width: 10,
-            height: 10,
+            width: 6,
+            height: 6,
             borderRadius: '50%',
-            backgroundColor: theme.palette.success.main,
-            boxShadow: `0 0 8px ${theme.palette.success.main}`,
-            '&::after': {
-              content: '""',
-              position: 'absolute',
-              inset: 0,
-              borderRadius: '50%',
-              backgroundColor: theme.palette.success.main,
-              animation: `${pulse} 2s infinite ease-out`,
-            },
+            bgcolor: 'primary.main',
+            animation: `${pulse} 2s infinite ease-out`,
           }}
         />
-        <Typography
-          variant="overline"
-          sx={{ letterSpacing: 1.5, color: 'text.secondary', lineHeight: 1 }}
-        >
-          {devices.length
-            ? `${devices.length} device${devices.length > 1 ? 's' : ''} available`
-            : 'Scanning for devices…'}
-        </Typography>
-        <IconButton
+        <Box sx={{ flex: 1 }} />
+        <Button
           size="small"
           onClick={refresh}
           disabled={scanning}
-          aria-label="Rescan for devices"
-          sx={{ color: 'text.secondary', ml: 0.5 }}
+          sx={{ color: 'text.secondary', fontWeight: 500 }}
         >
-          <Refresh
-            fontSize="small"
-            sx={{ animation: scanning ? `${spin} 800ms linear` : 'none' }}
-          />
-        </IconButton>
+          {scanning ? 'Looking…' : 'Look again'}
+        </Button>
       </Stack>
 
-      {error && (
-        <Alert severity="error" onClose={() => setError(undefined)}>
-          Could not connect: {error}
-        </Alert>
-      )}
-
-      <Stack direction="row" spacing={2} useFlexGap sx={{ flexWrap: 'wrap' }}>
-        {devices.map((d) => {
-          const isChromecast = d.type === 'chromecast';
-          const Icon = isChromecast ? Cast : Tv;
-          const isConnected = connectedId === d.id && state === 'CONNECTED';
-          const isLoading = connectedId === d.id && state === 'LOADING';
-          const accent = isChromecast ? theme.palette.secondary.main : theme.palette.primary.light;
-
+      <Stack direction="row" spacing={1.25} sx={{ overflowX: 'auto', pb: 0.5 }}>
+        {shown.map((d) => {
+          const selected = picked?.id === d.id;
+          const connecting = selected && connection?.state === 'CONNECTING';
+          const Icon = d.type === 'chromecast' ? Cast : Tv;
           return (
-            <Card
+            <ButtonBase
               key={d.id}
-              elevation={0}
+              onClick={() => !selected && onSelect(d)}
+              disabled={busy && !selected}
+              aria-pressed={selected}
+              title={d.ip ? `${d.name} · ${d.ip}` : d.name}
               sx={{
-                width: 220,
+                flex: '0 0 196px',
+                height: 68,
+                px: 1.75,
+                gap: 1.5,
+                justifyContent: 'flex-start',
+                textAlign: 'left',
+                borderRadius: '16px',
                 position: 'relative',
-                overflow: 'hidden',
-                background: `linear-gradient(145deg, ${alpha(accent, 0.08)} 0%, ${alpha(
-                  theme.palette.background.paper,
-                  0.9
-                )} 60%)`,
-                border: `1px solid ${
-                  isConnected ? theme.palette.success.main : 'rgba(255,255,255,0.08)'
-                }`,
-                boxShadow: isConnected
-                  ? `0 0 0 1px ${theme.palette.success.main}, 0 8px 24px ${alpha(
-                      theme.palette.success.main,
-                      0.25
-                    )}`
-                  : 'none',
-                transition: 'transform 200ms ease, box-shadow 200ms ease, border-color 200ms ease',
+                border: '2px solid',
+                borderColor: selected ? 'primary.main' : 'transparent',
+                bgcolor: selected ? 'rgba(94,242,192,0.12)' : 'rgba(255,255,255,0.07)',
+                transition: 'background-color 150ms ease, border-color 150ms ease',
                 '&:hover': {
-                  transform: 'translateY(-3px)',
-                  borderColor: alpha(accent, 0.5),
-                  boxShadow: `0 10px 28px ${alpha(accent, 0.25)}`,
+                  bgcolor: selected ? 'rgba(94,242,192,0.16)' : 'rgba(255,255,255,0.12)',
                 },
+                '&.Mui-disabled': { opacity: 0.5 },
               }}
             >
-              <CardActionArea
-                onClick={() => connect(d.id)}
-                disabled={state === 'LOADING'}
-                sx={{ p: 2 }}
+              <Box
+                sx={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: '12px',
+                  display: 'grid',
+                  placeItems: 'center',
+                  flexShrink: 0,
+                  background: ICON_BACKGROUNDS[d.type],
+                }}
               >
-                <Stack spacing={1.5} sx={{ height: 1 }}>
-                  <Stack
-                    direction="row"
-                    sx={{ alignItems: 'center', justifyContent: 'space-between' }}
-                  >
-                    <Box
-                      sx={{
-                        width: 44,
-                        height: 44,
-                        borderRadius: 2,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        backgroundColor: alpha(accent, 0.15),
-                        color: accent,
-                        animation: isLoading ? 'none' : `${float} 3.5s ease-in-out infinite`,
-                      }}
-                    >
-                      {isLoading ? (
-                        <CircularProgress size={22} sx={{ color: accent }} />
-                      ) : (
-                        <Icon fontSize="medium" />
-                      )}
-                    </Box>
-                    {isConnected && (
-                      <CheckCircle sx={{ color: theme.palette.success.main, fontSize: 20 }} />
-                    )}
-                  </Stack>
-
-                  <Typography
-                    noWrap
-                    sx={{
-                      fontWeight: 600,
-                      fontSize: 14,
-                      color: 'text.primary',
-                    }}
-                    title={d.name}
-                  >
-                    {d.name}
-                  </Typography>
-
-                  <Box
-                    sx={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: 1.5,
-                      width: 1,
-                    }}
-                  >
-                    <Chip
-                      label={isChromecast ? 'Chromecast' : 'DLNA'}
-                      size="small"
-                      sx={{
-                        height: 20,
-                        fontSize: 10,
-                        fontWeight: 600,
-                        letterSpacing: 0.5,
-                        color: accent,
-                        backgroundColor: alpha(accent, 0.12),
-                        border: `1px solid ${alpha(accent, 0.3)}`,
-                      }}
-                    />
-                    {d.ip && (
-                      <Typography
-                        variant="caption"
-                        sx={{ color: 'text.secondary', fontFamily: 'monospace' }}
-                      >
-                        {d.ip}
-                      </Typography>
-                    )}
-                  </Box>
-                </Stack>
-              </CardActionArea>
-            </Card>
+                {connecting ? (
+                  <CircularProgress size={18} sx={{ color: 'white' }} />
+                ) : (
+                  <Icon sx={{ fontSize: 20 }} />
+                )}
+              </Box>
+              <Stack sx={{ minWidth: 0 }}>
+                <Typography noWrap sx={{ fontWeight: 600, fontSize: 15 }}>
+                  {d.name}
+                </Typography>
+                <Typography noWrap sx={{ fontSize: 12, color: 'text.secondary' }}>
+                  {d.type === 'chromecast' ? 'Chromecast' : 'TV'}
+                </Typography>
+              </Stack>
+              {selected && !connecting && (
+                <Box
+                  sx={{
+                    position: 'absolute',
+                    top: 8,
+                    right: 8,
+                    width: 20,
+                    height: 20,
+                    borderRadius: '50%',
+                    bgcolor: 'primary.main',
+                    color: 'primary.contrastText',
+                    display: 'grid',
+                    placeItems: 'center',
+                  }}
+                >
+                  <CheckRounded sx={{ fontSize: 14 }} />
+                </Box>
+              )}
+            </ButtonBase>
           );
         })}
 
-        {!devices.length && (
-          <Card
-            elevation={0}
+        {!shown.length && (
+          <Stack
+            direction="row"
+            spacing={1.5}
             sx={{
-              width: 220,
-              height: 140,
-              display: 'flex',
+              flex: '0 0 auto',
+              height: 68,
+              px: 2.5,
               alignItems: 'center',
-              justifyContent: 'center',
-              border: '1px dashed rgba(255,255,255,0.12)',
-              background: 'transparent',
+              borderRadius: '16px',
+              border: '2px dashed rgba(255,255,255,0.12)',
             }}
           >
-            <Stack spacing={1} sx={{ alignItems: 'center' }}>
-              <CircularProgress size={20} sx={{ color: theme.palette.primary.light }} />
-              <Typography variant="caption" color="text.secondary">
-                Searching…
-              </Typography>
-            </Stack>
-          </Card>
+            <CircularProgress size={18} />
+            <Typography sx={{ fontSize: 14, color: 'text.secondary' }}>
+              Looking for TVs and Chromecasts on your network…
+            </Typography>
+          </Stack>
         )}
       </Stack>
     </Stack>

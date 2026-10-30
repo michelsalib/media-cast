@@ -1,14 +1,12 @@
-import { InfoOutlined } from '@mui/icons-material';
 import {
-  alpha,
   Box,
+  Button,
   Divider,
-  IconButton,
   Popover,
   Stack,
   type SxProps,
+  type Theme,
   Typography,
-  useTheme,
 } from '@mui/material';
 import { useRef, useState } from 'react';
 import type { FFProbeData } from '../../../main/ffmpeg';
@@ -16,7 +14,7 @@ import { api, pathFor } from '../ipc';
 
 interface Props {
   video: File;
-  sx?: SxProps;
+  sx?: SxProps<Theme>;
 }
 
 export default function VideoInfoButton({ video, sx }: Props): React.JSX.Element {
@@ -25,7 +23,6 @@ export default function VideoInfoButton({ video, sx }: Props): React.JSX.Element
   const [info, setInfo] = useState<FFProbeData>();
   const [error, setError] = useState<string>();
   const [lastVideo, setLastVideo] = useState(video);
-  const theme = useTheme();
 
   // Render-phase reset of cached probe data when the video prop changes.
   // https://react.dev/learn/you-might-not-need-an-effect#resetting-all-state-when-a-prop-changes
@@ -53,29 +50,20 @@ export default function VideoInfoButton({ video, sx }: Props): React.JSX.Element
 
   return (
     <>
-      <IconButton
+      <Button
         ref={anchorRef}
         onClick={show}
         size="small"
-        sx={{
-          color: alpha(theme.palette.common.white, 0.7),
-          backgroundColor: alpha(theme.palette.background.paper, 0.5),
-          backdropFilter: 'blur(8px)',
-          '&:hover': {
-            color: theme.palette.primary.light,
-            backgroundColor: alpha(theme.palette.background.paper, 0.7),
-          },
-          ...sx,
-        }}
+        sx={[{ color: 'text.secondary', fontWeight: 500 }, ...(Array.isArray(sx) ? sx : [sx])]}
       >
-        <InfoOutlined fontSize="small" />
-      </IconButton>
+        Details
+      </Button>
       <Popover
         open={open}
         anchorEl={anchorRef.current}
         onClose={() => setOpen(false)}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-        transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+        transformOrigin={{ vertical: 'top', horizontal: 'left' }}
       >
         <Box sx={{ p: 2, maxWidth: 420, minWidth: 280 }}>
           {error ? (
@@ -84,6 +72,9 @@ export default function VideoInfoButton({ video, sx }: Props): React.JSX.Element
             </Typography>
           ) : info ? (
             <Stack spacing={1.5}>
+              <Typography sx={{ fontWeight: 600, fontSize: 13, wordBreak: 'break-all' }}>
+                {video.name}
+              </Typography>
               <Section title="Format">
                 <Row label="Container" value={info.format.format_long_name} />
                 <Row label="Duration" value={formatDuration(Number(info.format.duration))} />

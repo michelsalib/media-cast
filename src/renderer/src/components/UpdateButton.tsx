@@ -17,7 +17,7 @@ export default function UpdateButton(): React.JSX.Element | null {
         size="small"
         sx={{
           appRegion: 'no-drag',
-          color: '#66bb6a',
+          color: 'primary.main',
           padding: '4px',
         }}
       >

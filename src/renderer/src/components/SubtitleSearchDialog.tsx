@@ -1,18 +1,13 @@
-import { Close, Search, Settings } from '@mui/icons-material';
+import { CloseRounded, SearchRounded, TuneRounded } from '@mui/icons-material';
 import {
   Alert,
   Box,
   Button,
-  Chip,
   CircularProgress,
-  Dialog,
-  DialogContent,
-  DialogTitle,
+  Drawer,
   IconButton,
+  InputAdornment,
   LinearProgress,
-  List,
-  ListItemButton,
-  ListItemText,
   Stack,
   TextField,
   Tooltip,
@@ -27,6 +22,7 @@ import {
   subtitleLanguageName,
 } from '../../../shared/subtitleSearch';
 import { api, errorMessage } from '../ipc';
+import { glassSx } from '../theme';
 import LanguagesInput from './LanguagesInput';
 import SubtitleSettingsDialog from './SubtitleSettingsDialog';
 import type { SubtitlesFile } from './SubtitlesSelection';
@@ -122,133 +118,159 @@ export default function SubtitleSearchDialog({
       .finally(() => setDownloading(undefined));
   }
 
+  const exact = response?.results.filter((r) => r.hashMatch) ?? [];
+  const others = response?.results.filter((r) => !r.hashMatch) ?? [];
+
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-      <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1, pr: 1 }}>
-        <Box sx={{ flex: 1 }}>Search subtitles online</Box>
+    <Drawer
+      anchor="right"
+      open={open}
+      onClose={onClose}
+      slotProps={{
+        backdrop: { sx: { backgroundColor: 'rgba(6,7,12,0.55)' } },
+        paper: {
+          sx: {
+            top: 44,
+            right: 12,
+            bottom: 12,
+            height: 'auto',
+            width: 'min(460px, calc(100% - 24px))',
+            borderRadius: '24px',
+            backgroundImage: 'none',
+            backgroundColor: 'rgba(24,26,40,0.94)',
+            backdropFilter: 'blur(30px)',
+            border: '1px solid rgba(255,255,255,0.08)',
+            boxShadow: '0 30px 80px rgba(0,0,0,0.55)',
+          },
+        },
+      }}
+    >
+      <Stack
+        direction="row"
+        spacing={0.75}
+        sx={{ alignItems: 'center', pl: 3, pr: 1.5, pt: 2.25, pb: 1 }}
+      >
+        <Typography variant="h2" sx={{ flex: 1 }}>
+          Find subtitles
+        </Typography>
         <Tooltip title="Languages, accounts and API keys">
-          <IconButton onClick={() => setSettingsOpen(true)}>
-            <Settings />
+          <IconButton onClick={() => setSettingsOpen(true)} sx={glassSx}>
+            <TuneRounded fontSize="small" />
           </IconButton>
         </Tooltip>
-        <IconButton onClick={onClose} aria-label="close">
-          <Close />
+        <IconButton onClick={onClose} aria-label="close" sx={glassSx}>
+          <CloseRounded fontSize="small" />
         </IconButton>
-      </DialogTitle>
-      <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, minHeight: 420 }}>
-        <Box
-          component="form"
-          onSubmit={submit}
-          sx={{
-            display: 'grid',
-            gridTemplateColumns: 'minmax(0, 1fr) 80px 80px 80px auto',
-            gap: 1.5,
-            pt: 1,
-            alignItems: 'start',
-          }}
-        >
-          <TextField
-            label="Title"
-            size="small"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-          />
-          <TextField
-            label="Year"
-            size="small"
-            value={year}
-            onChange={(e) => setYear(e.target.value.replace(/\D/g, ''))}
-          />
-          <TextField
-            label="Season"
-            size="small"
-            value={season}
-            onChange={(e) => setSeason(e.target.value.replace(/\D/g, ''))}
-          />
-          <TextField
-            label="Episode"
-            size="small"
-            value={episode}
-            onChange={(e) => setEpisode(e.target.value.replace(/\D/g, ''))}
-          />
-          <Button
-            type="submit"
-            variant="contained"
-            startIcon={<Search />}
-            disabled={searching || !title.trim()}
-            sx={{ height: 40 }}
-          >
-            Search
-          </Button>
-          <Box sx={{ gridColumn: '1 / -1' }}>
-            <LanguagesInput value={languages} onChange={setLanguages} />
-          </Box>
-        </Box>
+      </Stack>
 
-        {searching && <LinearProgress />}
+      <Box
+        component="form"
+        onSubmit={submit}
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: 'minmax(0, 1fr) 64px 64px 76px',
+          gap: 1,
+          px: 3,
+          pt: 1,
+          pb: 2,
+        }}
+      >
+        <TextField
+          aria-label="Title"
+          placeholder="Title"
+          size="small"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          slotProps={{
+            input: {
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchRounded fontSize="small" />
+                </InputAdornment>
+              ),
+            },
+          }}
+        />
+        <TextField
+          label="Season"
+          size="small"
+          value={season}
+          onChange={(e) => setSeason(e.target.value.replace(/\D/g, ''))}
+        />
+        <TextField
+          label="Ep."
+          size="small"
+          value={episode}
+          onChange={(e) => setEpisode(e.target.value.replace(/\D/g, ''))}
+        />
+        <TextField
+          label="Year"
+          size="small"
+          value={year}
+          onChange={(e) => setYear(e.target.value.replace(/\D/g, ''))}
+        />
+        <Box sx={{ gridColumn: '1 / 4' }}>
+          <LanguagesInput value={languages} onChange={setLanguages} />
+        </Box>
+        <Button
+          type="submit"
+          variant="contained"
+          disabled={searching || !title.trim()}
+          sx={{ height: 40, alignSelf: 'start', boxShadow: 'none' }}
+        >
+          Search
+        </Button>
+      </Box>
+
+      {searching && <LinearProgress sx={{ mx: 3, borderRadius: 1 }} />}
+
+      <Stack spacing={1} sx={{ flex: 1, minHeight: 0, overflowY: 'auto', px: 2, pb: 2 }}>
         {error && <Alert severity="error">{error}</Alert>}
-        {response?.notices.map((n) => (
-          <Alert key={n.provider} severity="info" sx={{ py: 0 }}>
-            <strong>{SUBTITLE_PROVIDER_NAMES[n.provider]}:</strong> {n.message}
-          </Alert>
-        ))}
 
         {response && !searching && response.results.length === 0 && (
           <Typography sx={{ color: 'text.secondary', textAlign: 'center', py: 4 }}>
-            No subtitles found. Try fixing the title, or clearing the year.
+            Nothing found. Try fixing the title, or clearing the year.
           </Typography>
         )}
 
-        {response && response.results.length > 0 && (
-          <List dense sx={{ overflowY: 'auto', mx: -1 }}>
-            {response.results.map((r) => (
-              <ListItemButton
-                key={`${r.provider}:${r.ref}`}
-                onClick={() => download(r)}
-                disabled={!!downloading}
-                sx={{ borderRadius: 1 }}
-              >
-                <ListItemText
-                  primary={r.release}
-                  slotProps={{
-                    primary: { sx: { wordBreak: 'break-word' } },
-                    secondary: { component: 'div' },
-                  }}
-                  secondary={
-                    <Stack direction="row" spacing={0.75} sx={{ mt: 0.5, flexWrap: 'wrap' }}>
-                      {r.hashMatch && (
-                        <Tooltip title="Matched by file fingerprint: made for this exact release, so it should already be in sync">
-                          <Chip size="small" color="success" label="Exact match" />
-                        </Tooltip>
-                      )}
-                      <Chip size="small" label={subtitleLanguageName(r.language)} />
-                      <Chip
-                        size="small"
-                        variant="outlined"
-                        label={SUBTITLE_PROVIDER_NAMES[r.provider]}
-                      />
-                      {r.hearingImpaired && (
-                        <Tooltip title="Hearing impaired: includes sound descriptions">
-                          <Chip size="small" variant="outlined" label="HI" />
-                        </Tooltip>
-                      )}
-                      {r.downloads !== undefined && (
-                        <Typography
-                          variant="caption"
-                          sx={{ color: 'text.secondary', alignSelf: 'center' }}
-                        >
-                          {r.downloads.toLocaleString()} downloads
-                        </Typography>
-                      )}
-                    </Stack>
-                  }
-                />
-                {downloading === r && <CircularProgress size={20} sx={{ ml: 1 }} />}
-              </ListItemButton>
-            ))}
-          </List>
+        {exact.length > 0 && <GroupLabel>Best for your file</GroupLabel>}
+        {exact.map((r, i) => (
+          <ResultRow
+            key={`${r.provider}:${r.ref}`}
+            result={r}
+            highlight={i === 0 ? 'strong' : 'soft'}
+            downloading={downloading === r}
+            disabled={!!downloading}
+            onUse={() => download(r)}
+          />
+        ))}
+
+        {others.length > 0 && (
+          <GroupLabel>{exact.length > 0 ? 'Other versions' : 'Results'}</GroupLabel>
         )}
-      </DialogContent>
+        {others.map((r) => (
+          <ResultRow
+            key={`${r.provider}:${r.ref}`}
+            result={r}
+            downloading={downloading === r}
+            disabled={!!downloading}
+            onUse={() => download(r)}
+          />
+        ))}
+      </Stack>
+
+      {!!response?.notices.length && (
+        <Stack
+          spacing={0.25}
+          sx={{ px: 3, py: 1.75, borderTop: '1px solid rgba(255,255,255,0.08)' }}
+        >
+          {response.notices.map((n) => (
+            <Typography key={n.provider} sx={{ fontSize: 12, color: '#9DA2B8' }}>
+              {SUBTITLE_PROVIDER_NAMES[n.provider]}: {n.message}
+            </Typography>
+          ))}
+        </Stack>
+      )}
 
       <SubtitleSettingsDialog
         open={settingsOpen}
@@ -258,6 +280,107 @@ export default function SubtitleSearchDialog({
           if (title.trim()) search({ ...currentQuery(), languages: settings.languages });
         }}
       />
-    </Dialog>
+    </Drawer>
+  );
+}
+
+function GroupLabel({ children }: { children: React.ReactNode }): React.JSX.Element {
+  return (
+    <Typography sx={{ px: 1, pt: 1, fontSize: 13, color: 'text.secondary' }}>{children}</Typography>
+  );
+}
+
+function ResultRow({
+  result,
+  highlight,
+  downloading,
+  disabled,
+  onUse,
+}: {
+  result: SubtitleSearchResult;
+  highlight?: 'strong' | 'soft';
+  downloading: boolean;
+  disabled: boolean;
+  onUse: () => void;
+}): React.JSX.Element {
+  const facts = [
+    result.release,
+    SUBTITLE_PROVIDER_NAMES[result.provider],
+    result.downloads !== undefined ? `${result.downloads.toLocaleString()} downloads` : undefined,
+  ].filter(Boolean);
+
+  return (
+    <Stack
+      direction="row"
+      spacing={1.75}
+      sx={{
+        alignItems: 'center',
+        pl: 2,
+        pr: 1.5,
+        py: highlight ? 1.75 : 1.25,
+        borderRadius: highlight ? '18px' : '16px',
+        background: highlight
+          ? `linear-gradient(135deg, rgba(94,242,192,${highlight === 'strong' ? 0.18 : 0.1}), rgba(181,108,245,${highlight === 'strong' ? 0.14 : 0.08}))`
+          : 'rgba(255,255,255,0.05)',
+        boxShadow: highlight
+          ? `inset 0 0 0 1px rgba(94,242,192,${highlight === 'strong' ? 0.35 : 0.2})`
+          : 'none',
+      }}
+    >
+      <Stack spacing={0.25} sx={{ flex: 1, minWidth: 0 }}>
+        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+          <Typography sx={{ fontWeight: 600, fontSize: 15 }}>
+            {subtitleLanguageName(result.language)}
+            {result.hearingImpaired && (
+              <Box component="span" sx={{ fontWeight: 400, color: 'text.secondary' }}>
+                {' '}
+                · with sound descriptions
+              </Box>
+            )}
+          </Typography>
+          {result.hashMatch && (
+            <Tooltip title="Matched by file fingerprint: made for this exact release, so it should already be in sync">
+              <Box
+                sx={{
+                  height: 20,
+                  px: 1,
+                  borderRadius: 999,
+                  bgcolor: 'primary.main',
+                  color: 'primary.contrastText',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                Perfect match
+              </Box>
+            </Tooltip>
+          )}
+        </Stack>
+        <Typography
+          noWrap
+          title={result.release}
+          sx={{ fontSize: 12, color: highlight ? 'text.secondary' : '#9DA2B8' }}
+        >
+          {facts.join(' · ')}
+        </Typography>
+      </Stack>
+      <Button
+        onClick={onUse}
+        disabled={disabled}
+        variant={highlight === 'strong' ? 'contained' : 'text'}
+        sx={{
+          height: 36,
+          minWidth: 64,
+          flexShrink: 0,
+          boxShadow: 'none',
+          ...(highlight !== 'strong' && glassSx),
+        }}
+      >
+        {downloading ? <CircularProgress size={16} color="inherit" /> : 'Use'}
+      </Button>
+    </Stack>
   );
 }

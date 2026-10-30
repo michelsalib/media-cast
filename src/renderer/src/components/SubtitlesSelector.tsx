@@ -1,8 +1,10 @@
-import { MenuItem, Select } from '@mui/material';
+import { Button, Stack, Tooltip } from '@mui/material';
 import { useEffect, useState } from 'react';
 import { isBitmapSubtitleCodec } from '../../../shared/subtitles';
 import type { DeviceType } from '../../../shared/types';
 import { api, pathFor } from '../ipc';
+import { languageName } from '../labels';
+import { pillSx } from '../theme';
 import { NO_SUBTITLES, type SubtitlesFile, type SubtitlesSelection } from './SubtitlesSelection';
 
 type Props = {
@@ -29,6 +31,26 @@ function choiceKey(c: SubtitlesSelection): string {
   }
 }
 
+function choiceLabel(c: SubtitlesSelection): string {
+  switch (c.type) {
+    case 'external':
+      return 'Added subtitles';
+    case 'internal':
+      return c.name;
+    default:
+      return 'Off';
+  }
+}
+
+// "English", "English · SDH", or the track title alone when it already names the language.
+function trackName(language: string | undefined, title: string | undefined, i: number): string {
+  const lang = languageName(language);
+  if (lang && title && !title.toLowerCase().includes(lang.toLowerCase())) {
+    return `${lang} · ${title}`;
+  }
+  return title || lang || `Track ${i + 1}`;
+}
+
 export default function SubtitlesSelector({
   onChange,
   subFile,
@@ -42,7 +64,11 @@ export default function SubtitlesSelector({
     let cancelled = false;
 
     async function compute(): Promise<void> {
-      const newChoices: SubtitlesSelection[] = [NO_SUBTITLES];
+      const newChoices: SubtitlesSelection[] = [];
+
+      if (subFile) {
+        newChoices.push({ type: 'external', name: subFile.name, path: subFile.path });
+      }
 
       if (videoFile) {
         const probeData = await api.probe(pathFor(videoFile));
@@ -52,16 +78,14 @@ export default function SubtitlesSelector({
             (s, i): SubtitlesSelection => ({
               type: 'internal',
               index: i,
-              name: s.tags?.title || s.tags?.language || 'Unknown video subtitles',
+              name: trackName(s.tags?.language, s.tags?.title, i),
               bitmap: isBitmapSubtitleCodec(s.codec_name),
             })
           );
         newChoices.push(...internal);
       }
 
-      if (subFile) {
-        newChoices.push({ type: 'external', name: subFile.name, path: subFile.path });
-      }
+      newChoices.push(NO_SUBTITLES);
 
       if (cancelled) {
         return;
@@ -88,19 +112,30 @@ export default function SubtitlesSelector({
   }, [choice, onChange]);
 
   return (
-    <Select
-      variant="standard"
-      value={choices.indexOf(choice)}
-      onChange={(e) => {
-        const selection = choices[Number(e.target.value)];
-        setChoice(selection);
-      }}
-    >
-      {choices.map((c, i) => (
-        <MenuItem key={choiceKey(c)} value={i} disabled={!isSupported(c, deviceType)}>
-          {isSupported(c, deviceType) ? c.name : `${c.name} (image subtitles, not supported)`}
-        </MenuItem>
-      ))}
-    </Select>
+    <Stack direction="row" useFlexGap sx={{ gap: 1, flexWrap: 'wrap' }}>
+      {choices.map((c) => {
+        const selected = c === choice;
+        const supported = isSupported(c, deviceType);
+        const hint = !supported
+          ? 'Image subtitles can’t be shown on a Chromecast'
+          : c.type === 'external'
+            ? c.name
+            : '';
+        return (
+          <Tooltip key={choiceKey(c)} title={hint} placement="top">
+            <span>
+              <Button
+                aria-pressed={selected}
+                disabled={!supported}
+                onClick={() => setChoice(c)}
+                sx={pillSx(selected)}
+              >
+                {choiceLabel(c)}
+              </Button>
+            </span>
+          </Tooltip>
+        );
+      })}
+    </Stack>
   );
 }

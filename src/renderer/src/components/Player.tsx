@@ -1,64 +1,42 @@
-import { Cast, LinkOff, Memory, Tv } from '@mui/icons-material';
-import {
-  alpha,
-  Box,
-  Chip,
-  IconButton,
-  keyframes,
-  Slide,
-  Slider,
-  Stack,
-  Tooltip,
-  Typography,
-  useTheme,
-} from '@mui/material';
+import { AutoAwesomeRounded, StopRounded, VideoLibraryRounded } from '@mui/icons-material';
+import { Box, Button, Slider, Stack, Tooltip, Typography } from '@mui/material';
 import format from 'format-duration';
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import type { Device, PlayerStatus } from '../../../shared/types';
-import { api, onEvent } from '../ipc';
+import { api } from '../ipc';
+import { glassSx } from '../theme';
+import { Artwork } from './Artwork';
 import PlayPause from './PlayPauseSeek';
 
-const marquee = keyframes`
-  0%, 10%   { transform: translateX(0); }
-  50%, 90%  { transform: translateX(calc(-1 * var(--marquee-distance, 0px))); animation-timing-function: steps(1, end); }
-  100%      { transform: translateX(0); }
-`;
-
 type Props = {
-  device: Device | null;
-  onDisconnect?: () => void;
+  status: PlayerStatus;
+  device: Device;
+  artworkUrl?: string;
+  title: string;
+  details?: string;
+  onBrowse: () => void;
+  onStop: () => void;
 };
 
-const pulse = (color: string) => keyframes`
-  0%, 100% { box-shadow: 0 0 0 0   ${alpha(color, 0.45)}; }
-  50%      { box-shadow: 0 0 0 6px ${alpha(color, 0)};    }
-`;
+const STATE_LABELS: Record<PlayerStatus['playerState'], string> = {
+  PLAYING: 'Playing on',
+  PAUSED: 'Paused on',
+  BUFFERING: 'Loading on',
+  IDLE: 'Ready on',
+};
 
-export default function Player({ device, onDisconnect }: Props): React.JSX.Element {
-  const [status, setStatus] = useState<PlayerStatus | undefined>(undefined);
-  const [marqueeDistance, setMarqueeDistance] = useState(0);
+export default function Player({
+  status,
+  device,
+  artworkUrl,
+  title,
+  details,
+  onBrowse,
+  onStop,
+}: Props): React.JSX.Element {
   const [dragValue, setDragValue] = useState<number | undefined>();
-  const theme = useTheme();
-  const headerRef = useRef<HTMLDivElement>(null);
-  const titleRef = useRef<HTMLSpanElement>(null);
-
-  useEffect(() => {
-    return onEvent('status', setStatus);
-  }, []);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: re-run on device change to clear stale status
-  useEffect(() => {
-    setStatus(undefined);
-  }, [device?.id]);
-
-  function startMarquee(): void {
-    const el = titleRef.current;
-    if (!el) return;
-    setMarqueeDistance(Math.max(0, el.scrollWidth - el.clientWidth));
-  }
-  function stopMarquee(): void {
-    setMarqueeDistance(0);
-  }
+  const duration = status.duration || 0;
+  const position = dragValue ?? status.currentTime ?? 0;
 
   // Seek once on release. onChange fires continuously while dragging: every Seek makes a
   // UPnP TV re-request the stream, which restarts the transcoder each time. Meanwhile the
@@ -68,170 +46,142 @@ export default function Player({ device, onDisconnect }: Props): React.JSX.Eleme
     void api.seek(value);
   }
 
-  function disconnect(): void {
-    void api.disconnect();
-    onDisconnect?.();
-  }
-
-  const isPlaying = status?.playerState === 'PLAYING';
-  const DeviceIcon = device?.type === 'chromecast' ? Cast : Tv;
-  const deviceAccent =
-    device?.type === 'chromecast' ? theme.palette.secondary.main : theme.palette.primary.light;
-
   return (
-    <Box>
-      <Slide
-        direction="down"
-        in={!!device}
-        container={headerRef.current}
-        mountOnEnter
-        unmountOnExit
-      >
-        <Box
-          ref={headerRef}
+    <Stack sx={{ height: '100%', alignItems: 'center', px: 5, pt: 1.5, pb: 3, minHeight: 0 }}>
+      {/* Shrinks on short windows so the controls stay on screen. */}
+      <Artwork
+        url={artworkUrl}
+        sx={{ width: 'min(420px, 100%, (100vh - 420px) * 16 / 9)', borderRadius: '20px' }}
+      />
+
+      <Stack direction="row" spacing={1} sx={{ mt: 2.5, alignItems: 'center' }}>
+        <Stack
+          direction="row"
+          spacing={1}
           sx={{
-            display: 'flex',
+            height: 30,
+            px: 1.75,
             alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 2,
-            mb: 3,
-            px: 2,
-            py: 1.25,
-            borderRadius: 2,
-            background: `linear-gradient(90deg, ${alpha(deviceAccent, 0.12)} 0%, ${alpha(
-              theme.palette.background.paper,
-              0.6
-            )} 100%)`,
-            border: `1px solid ${alpha(deviceAccent, 0.25)}`,
-            backdropFilter: 'blur(8px)',
+            borderRadius: 999,
+            bgcolor: 'rgba(255,255,255,0.1)',
+            fontSize: 13,
+            fontWeight: 500,
           }}
         >
-          <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', minWidth: 0 }}>
-            <Box
+          <Box
+            sx={{
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              bgcolor: 'primary.main',
+              boxShadow: '0 0 0 4px rgba(94,242,192,0.25)',
+            }}
+          />
+          <span>
+            {STATE_LABELS[status.playerState]} {device.name}
+          </span>
+        </Stack>
+        {status.transcoded && (
+          <Tooltip title="ffmpeg is re-encoding this file on the fly for the TV">
+            <Stack
+              direction="row"
+              spacing={0.75}
               sx={{
-                width: 32,
-                height: 32,
-                borderRadius: '50%',
-                display: 'flex',
+                height: 30,
+                px: 1.5,
                 alignItems: 'center',
-                justifyContent: 'center',
-                backgroundColor: alpha(deviceAccent, 0.18),
-                color: deviceAccent,
-                flexShrink: 0,
-                animation: isPlaying ? `${pulse(deviceAccent)} 1.8s ease-out infinite` : 'none',
+                borderRadius: 999,
+                bgcolor: 'rgba(255,255,255,0.1)',
+                fontSize: 13,
+                color: 'text.secondary',
               }}
             >
-              <DeviceIcon fontSize="small" />
-            </Box>
-            <Stack sx={{ minWidth: 0 }}>
-              <Typography
-                variant="overline"
-                sx={{ lineHeight: 1, color: 'text.secondary', letterSpacing: 1.2 }}
-              >
-                Casting to
-              </Typography>
-              <Typography noWrap sx={{ fontWeight: 600, fontSize: 14 }} title={device?.name}>
-                {device?.name}
-              </Typography>
+              <AutoAwesomeRounded sx={{ fontSize: 14 }} />
+              <span>Converting</span>
             </Stack>
-          </Stack>
-          <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', flexShrink: 0 }}>
-            {status?.transcoded && (
-              <Tooltip
-                title="ffmpeg is re-encoding this file on the fly for the TV"
-                placement="bottom"
-              >
-                <Chip
-                  size="small"
-                  icon={<Memory />}
-                  label="Transcoding"
-                  sx={{
-                    height: 22,
-                    fontSize: 11,
-                    fontWeight: 600,
-                    letterSpacing: 0.5,
-                    color: theme.palette.warning.light,
-                    backgroundColor: alpha(theme.palette.warning.main, 0.12),
-                    border: `1px solid ${alpha(theme.palette.warning.main, 0.35)}`,
-                    '& .MuiChip-icon': {
-                      color: theme.palette.warning.light,
-                      fontSize: 14,
-                      ml: 0.5,
-                    },
-                  }}
-                />
-              </Tooltip>
-            )}
-            <Tooltip title="Disconnect" placement="left">
-              <IconButton
-                onClick={disconnect}
-                size="small"
-                sx={{
-                  color: 'text.secondary',
-                  border: '1px solid rgba(255,255,255,0.08)',
-                  backgroundColor: alpha(theme.palette.background.paper, 0.6),
-                  transition: 'all 180ms ease',
-                  '&:hover': {
-                    color: theme.palette.error.light,
-                    borderColor: alpha(theme.palette.error.main, 0.5),
-                    backgroundColor: alpha(theme.palette.error.main, 0.12),
-                    boxShadow: `0 0 12px ${alpha(theme.palette.error.main, 0.35)}`,
-                  },
-                }}
-              >
-                <LinkOff fontSize="small" />
-              </IconButton>
-            </Tooltip>
-          </Stack>
-        </Box>
-      </Slide>
+          </Tooltip>
+        )}
+      </Stack>
 
-      <Stack
-        useFlexGap
-        direction="column"
-        sx={{
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
+      <Typography
+        variant="h1"
+        noWrap
+        sx={{ mt: 1.5, fontSize: 32, maxWidth: '100%' }}
+        title={title}
       >
-        <Box
-          onMouseEnter={startMarquee}
-          onMouseLeave={stopMarquee}
-          sx={{ width: 1, overflow: 'hidden' }}
-        >
-          <Typography
-            ref={titleRef}
-            variant="h3"
-            sx={{
-              whiteSpace: 'nowrap',
-              ...(marqueeDistance > 0
-                ? {
-                    display: 'inline-block',
-                    '--marquee-distance': `${marqueeDistance}px`,
-                    animation: `${marquee} ${marqueeDistance / 60 + 3}s ease-in-out infinite`,
-                  }
-                : {
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                  }),
-            }}
-          >
-            {status?.title || 'no media'}
-          </Typography>
-        </Box>
-        <PlayPause status={status} />
+        {title}
+      </Typography>
+      {details && (
+        <Typography sx={{ mt: 0.5, color: 'text.secondary' }} noWrap>
+          {details}
+        </Typography>
+      )}
+
+      <Box sx={{ flex: 1, minHeight: 16 }} />
+
+      <Box sx={{ alignSelf: 'stretch' }}>
         <Slider
+          aria-label="Position"
           min={0}
-          max={status?.duration || 100}
-          value={dragValue ?? (status?.currentTime || 0)}
+          max={duration || 100}
+          value={position}
+          disabled={!duration}
           onChange={(_evt, value) => setDragValue(value)}
           onChangeCommitted={seek}
+          sx={{
+            height: 6,
+            py: 1,
+            '& .MuiSlider-rail': { bgcolor: 'rgba(255,255,255,0.15)', opacity: 1 },
+            '& .MuiSlider-track': { border: 0 },
+            '& .MuiSlider-thumb': {
+              width: 16,
+              height: 16,
+              bgcolor: '#FFFFFF',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+            },
+          }}
         />
-        <Stack direction="row" sx={{ width: '100%', justifyContent: 'space-between' }}>
-          <div>{status?.currentTime ? format(status.currentTime * 1000) : 'NA'}</div>
-          <div>{status?.duration ? format(status.duration * 1000) : 'NA'}</div>
+        <Stack
+          direction="row"
+          sx={{
+            justifyContent: 'space-between',
+            fontSize: 12,
+            color: 'text.secondary',
+            fontVariantNumeric: 'tabular-nums',
+          }}
+        >
+          <span>{format(position * 1000)}</span>
+          <span>{duration ? `−${format(Math.max(0, duration - position) * 1000)}` : ''}</span>
         </Stack>
-      </Stack>
-    </Box>
+      </Box>
+
+      <Box
+        sx={{
+          alignSelf: 'stretch',
+          display: 'grid',
+          gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+          alignItems: 'center',
+          mt: 1,
+        }}
+      >
+        <Box>
+          <Button
+            onClick={onBrowse}
+            startIcon={<VideoLibraryRounded />}
+            sx={{ ...glassSx, height: 38 }}
+          >
+            Another video
+          </Button>
+        </Box>
+        <Stack sx={{ alignItems: 'center' }}>
+          <PlayPause status={status} />
+        </Stack>
+        <Stack direction="row" sx={{ justifyContent: 'flex-end' }}>
+          <Button onClick={onStop} startIcon={<StopRounded />} sx={{ ...glassSx, height: 38 }}>
+            Stop
+          </Button>
+        </Stack>
+      </Box>
+    </Stack>
   );
 }
