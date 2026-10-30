@@ -65,6 +65,13 @@ DLNA `protocolInfo` / `contentFeatures.dlna.org` values live in [upnp/dlna.ts](s
 
 `load` handler branching: UPnP → burn-in; Chromecast → sidecar WebVTT.
 
+### Online subtitle search ([src/main/subtitles/](src/main/subtitles/))
+
+- Providers behind `SubtitleProvider` ([provider.ts](src/main/subtitles/provider.ts)): OpenSubtitles.com (REST v1, moviehash + title; optional login for download quota), Subdl (API key; zips unpacked with `fflate`, `.rar` results dropped), Gestdown (keyless Addic7ed proxy, TV only). Missing keys throw `ProviderSkipped` → shown as notices, not errors. Podnapisi was left out (unreachable / unreliable).
+- API keys are baked in at build time from `MAIN_VITE_OPENSUBTITLES_API_KEY` / `MAIN_VITE_SUBDL_API_KEY` (gitignored `.env.local` in dev, `OPENSUBTITLES_API_KEY` / `SUBDL_API_KEY` repo secrets in CI); a key typed in settings overrides them. Settings live in `userData/subtitle-settings.json`, password via `safeStorage`.
+- Downloads and resyncs go to `userData/subtitle-cache/` and come back as a path; the renderer treats them as a dropped sidecar (`SubtitlesSelection` external is path-based).
+- Sync preview: [PreviewServer](src/main/PreviewServer.ts) on `127.0.0.1` (CSP `media-src` allows it) serves the file directly when Chromium can play it, else `transcodePreview` (720p fMP4, always re-encoded so `-ss` is frame-accurate; the renderer restarts the stream with `?t=` per seek). Cues are drawn by the renderer, so retiming is live; `retimeSubtitles` writes `t·ratio + offset` to a new SRT.
+
 ### Renderer UI
 
 State is flat — `useState` only, ownership by component:

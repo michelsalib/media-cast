@@ -11,3 +11,7 @@ resources/bin/**/ffmpeg
 resources/bin/**/ffmpeg.exe
 resources/bin/**/ffprobe
 resources/bin/**/ffprobe.exe
+
+# Local build secrets (OpenSubtitles consumer key). CI injects them from repo secrets.
+.env.local
+.env.*.local

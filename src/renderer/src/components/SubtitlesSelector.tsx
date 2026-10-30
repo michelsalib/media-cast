@@ -3,11 +3,11 @@ import { useEffect, useState } from 'react';
 import { isBitmapSubtitleCodec } from '../../../shared/subtitles';
 import type { DeviceType } from '../../../shared/types';
 import { api, pathFor } from '../ipc';
-import { NO_SUBTITLES, type SubtitlesSelection } from './SubtitlesSelection';
+import { NO_SUBTITLES, type SubtitlesFile, type SubtitlesSelection } from './SubtitlesSelection';
 
 type Props = {
   videoFile?: File;
-  subFile?: File;
+  subFile?: SubtitlesFile;
   deviceType?: DeviceType;
   onChange?: (selection: SubtitlesSelection) => void;
 };
@@ -21,7 +21,7 @@ function isSupported(c: SubtitlesSelection, deviceType: DeviceType | undefined):
 function choiceKey(c: SubtitlesSelection): string {
   switch (c.type) {
     case 'external':
-      return `ext:${c.file.name}`;
+      return `ext:${c.path}`;
     case 'internal':
       return `int:${c.index}`;
     default:
@@ -60,7 +60,7 @@ export default function SubtitlesSelector({
       }
 
       if (subFile) {
-        newChoices.push({ type: 'external', name: subFile.name, file: subFile });
+        newChoices.push({ type: 'external', name: subFile.name, path: subFile.path });
       }
 
       if (cancelled) {

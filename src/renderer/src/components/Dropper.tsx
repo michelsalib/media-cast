@@ -1,9 +1,11 @@
 import {
   ArrowDropDown,
+  AvTimer,
   Bolt,
   Cast,
   ExpandMore,
   FolderOpen,
+  ManageSearch,
   Memory,
   MovieCreation,
   VideoFile,
@@ -18,6 +20,7 @@ import {
   Box,
   Button,
   ButtonGroup,
+  IconButton,
   keyframes,
   ListItemIcon,
   ListItemText,
@@ -39,7 +42,9 @@ import type { Device } from '../../../shared/types';
 import { api, errorMessage, pathFor } from '../ipc';
 import type { AudioSelection } from './AudioSelection';
 import AudioSelector from './AudioSelector';
-import { NO_SUBTITLES, type SubtitlesSelection } from './SubtitlesSelection';
+import SubtitleSearchDialog from './SubtitleSearchDialog';
+import SubtitleSyncDialog, { type SyncSource } from './SubtitleSyncDialog';
+import { NO_SUBTITLES, type SubtitlesFile, type SubtitlesSelection } from './SubtitlesSelection';
 import SubtitlesSelector from './SubtitlesSelector';
 import VideoInfoButton from './VideoInfoButton';
 
@@ -67,7 +72,7 @@ export default function Dropper(props: Props): React.JSX.Element {
   const [isOver, setIsOver] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
   const [video, setVideo] = useState<File | undefined>();
-  const [subs, setSubs] = useState<File | undefined>();
+  const [subs, setSubs] = useState<SubtitlesFile | undefined>();
   const [subtitlesSelection, setSubtitlesSelection] = useState<SubtitlesSelection>(NO_SUBTITLES);
   const [audioSelection, setAudioSelection] = useState<AudioSelection | undefined>();
   const [thumbnail, setThumbnail] = useState<Uint8Array | undefined>(undefined);
@@ -75,6 +80,8 @@ export default function Dropper(props: Props): React.JSX.Element {
   const [burnSubtitles, setBurnSubtitles] = useState(false);
   const [casting, setCasting] = useState(false);
   const [castError, setCastError] = useState<string | undefined>();
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [syncSource, setSyncSource] = useState<SyncSource | undefined>();
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const [marqueeDistance, setMarqueeDistance] = useState(0);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -96,6 +103,14 @@ export default function Dropper(props: Props): React.JSX.Element {
   const forceBurn =
     showBurnToggle && subtitlesSelection.type === 'internal' && subtitlesSelection.bitmap;
   const effectiveBurn = showBurnToggle && (forceBurn || burnSubtitles);
+  const videoPath = useMemo(() => (video ? pathFor(video) : undefined), [video]);
+  // Text tracks only: image subtitles have no lines to show or retime.
+  const syncableSelection: SyncSource | undefined =
+    subtitlesSelection.type === 'external'
+      ? { name: subtitlesSelection.name, pathOrIndex: subtitlesSelection.path }
+      : subtitlesSelection.type === 'internal' && !subtitlesSelection.bitmap
+        ? { name: subtitlesSelection.name, pathOrIndex: subtitlesSelection.index }
+        : undefined;
 
   function ingest(files: Iterable<File>): void {
     const rejected: string[] = [];
@@ -104,7 +119,7 @@ export default function Dropper(props: Props): React.JSX.Element {
       if (VIDEO_EXTENSIONS.includes(ext)) {
         setVideo(file);
       } else if (SUBTITLE_EXTENSIONS.includes(ext)) {
-        setSubs(file);
+        setSubs({ name: file.name, path: pathFor(file) });
       } else {
         rejected.push(file.name);
       }
@@ -153,7 +168,7 @@ export default function Dropper(props: Props): React.JSX.Element {
     }
     const subsArg =
       subtitlesSelection.type === 'external'
-        ? pathFor(subtitlesSelection.file)
+        ? subtitlesSelection.path
         : subtitlesSelection.type === 'internal'
           ? subtitlesSelection.index
           : undefined;
@@ -519,12 +534,34 @@ export default function Dropper(props: Props): React.JSX.Element {
                 </>
               )}
               <FormLabel>Subtitles</FormLabel>
-              <SubtitlesSelector
-                subFile={subs}
-                videoFile={video}
-                deviceType={props.device?.type}
-                onChange={setSubtitlesSelection}
-              />
+              <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center', minWidth: 0 }}>
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <SubtitlesSelector
+                    subFile={subs}
+                    videoFile={video}
+                    deviceType={props.device?.type}
+                    onChange={setSubtitlesSelection}
+                  />
+                </Box>
+                <Tooltip placement="top" title="Search subtitles online">
+                  <span>
+                    <IconButton size="small" disabled={!video} onClick={() => setSearchOpen(true)}>
+                      <ManageSearch fontSize="small" />
+                    </IconButton>
+                  </span>
+                </Tooltip>
+                <Tooltip placement="top" title="Preview and resync subtitles">
+                  <span>
+                    <IconButton
+                      size="small"
+                      disabled={!video || !syncableSelection}
+                      onClick={() => setSyncSource(syncableSelection)}
+                    >
+                      <AvTimer fontSize="small" />
+                    </IconButton>
+                  </span>
+                </Tooltip>
+              </Stack>
               {showBurnToggle && (
                 <>
                   <FormLabel>Burn into video</FormLabel>
@@ -552,6 +589,27 @@ export default function Dropper(props: Props): React.JSX.Element {
           </Box>
         </AccordionDetails>
       </Accordion>
+      {videoPath && (
+        <>
+          <SubtitleSearchDialog
+            open={searchOpen}
+            videoPath={videoPath}
+            onClose={() => setSearchOpen(false)}
+            onDownloaded={(file) => setSyncSource({ name: file.name, pathOrIndex: file.path })}
+          />
+          <SubtitleSyncDialog
+            videoPath={videoPath}
+            audioIndex={audioSelection?.index}
+            source={syncSource}
+            onClose={() => setSyncSource(undefined)}
+            onApply={(file) => {
+              setSubs(file);
+              setSyncSource(undefined);
+              setSearchOpen(false);
+            }}
+          />
+        </>
+      )}
       <Snackbar
         open={!!castError}
         onClose={() => setCastError(undefined)}

@@ -349,6 +349,75 @@ export async function transcodeToMpegTs(options: TranscodeOptions): Promise<Tran
   };
 }
 
+export interface PreviewTranscodeOptions {
+  videoPath: string;
+  seekSeconds: number;
+  audioTrackIndex?: number;
+  hdr?: boolean;
+}
+
+/**
+ * Fast 720p H.264 + AAC fragmented MP4 for the in-app <video> preview, starting at
+ * `seekSeconds`. Video is always re-encoded: input seeking is then frame-accurate and
+ * output time 0 is exactly `seekSeconds` — stream copy would start at the previous
+ * keyframe and throw subtitle sync checks off by seconds.
+ */
+export async function transcodePreview(options: PreviewTranscodeOptions): Promise<TranscodeHandle> {
+  const { videoPath, seekSeconds, audioTrackIndex = 0, hdr = false } = options;
+  const filters = ['scale=-2:min(720\\,ih)'];
+  if (hdr) {
+    filters.push(HDR_TONEMAP_FILTER);
+  }
+  filters.push('format=yuv420p');
+  const args = [
+    ...(seekSeconds > 0 ? ['-ss', String(seekSeconds)] : []),
+    '-i',
+    videoPath,
+    '-map',
+    '0:v:0',
+    '-map',
+    `0:a:${audioTrackIndex}?`,
+    '-vf',
+    filters.join(','),
+    '-c:v',
+    'libx264',
+    '-preset',
+    'ultrafast',
+    '-tune',
+    'zerolatency',
+    '-crf',
+    '26',
+    '-c:a',
+    'aac',
+    '-ac',
+    '2',
+    '-b:a',
+    '128k',
+    '-movflags',
+    'frag_keyframe+empty_moov+default_base_moof',
+    '-f',
+    'mp4',
+    'pipe:1',
+  ];
+
+  const ffmpeg = spawn(ffmpegPath, args, { stdio: ['ignore', 'pipe', 'ignore'] });
+  if (!ffmpeg.stdout) {
+    throw new Error('ffmpeg stdout is not piped');
+  }
+  await new Promise<void>((resolve, reject) => {
+    ffmpeg.once('spawn', resolve);
+    ffmpeg.once('error', reject);
+  });
+  return {
+    stream: ffmpeg.stdout,
+    kill: () => {
+      if (!ffmpeg.killed) {
+        ffmpeg.kill('SIGKILL');
+      }
+    },
+  };
+}
+
 // Linearize, tone map to SDR, then convert back to BT.709 limited range.
 const HDR_TONEMAP_FILTER = [
   // Drop the HDR10 metadata too, or x264 copies it into the SDR stream as SEI.

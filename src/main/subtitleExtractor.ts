@@ -86,13 +86,13 @@ function decodeText(bytes: Buffer): string {
   return new TextDecoder(isUtf8(bytes) ? 'utf-8' : 'windows-1252').decode(bytes);
 }
 
-interface SrtCue {
+export interface SrtCue {
   startMs: number;
   endMs: number;
   text: string;
 }
 
-function parseSrt(srt: string): SrtCue[] {
+export function parseSrt(srt: string): SrtCue[] {
   const cues: SrtCue[] = [];
   const blocks = srt.replace(/^﻿/, '').split(/\r?\n\r?\n+/);
 

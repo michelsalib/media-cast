@@ -27,6 +27,7 @@ configureBinaries({
 import { createMainApi, registerMainApi, sendEvent } from './api';
 import { MediaServer } from './MediaServer';
 import { PlaybackController } from './PlaybackController';
+import { PreviewServer } from './PreviewServer';
 import { type UpnpDevice, UpnpDevicesScanner } from './upnp/DevicesScanner';
 
 const port = 4004;
@@ -109,6 +110,7 @@ app.whenReady().then(() => {
   const chromecastScanner = new ChromecastDevicesScanner();
   const upnpScanner = new UpnpDevicesScanner();
   const server = new MediaServer(port);
+  const preview = new PreviewServer();
 
   const knownDevices = new Map<string, KnownDevice>();
   const controller = new PlaybackController(mainWindow, server, () => knownDevices);
@@ -143,7 +145,7 @@ app.whenReady().then(() => {
 
   const scanners: DevicesScanner[] = [chromecastScanner, upnpScanner];
 
-  registerMainApi(createMainApi({ controller, scanners, updater: autoUpdater }));
+  registerMainApi(createMainApi({ controller, preview, scanners, updater: autoUpdater }));
 
   // Stop + UNSUBSCRIBE must reach the renderer, or the TV is left on a dead URL and
   // keeps NOTIFYing a closed port until the subscription expires. Run once, and hold
@@ -155,7 +157,7 @@ app.whenReady().then(() => {
         await controller.close().catch((err) => console.error('controller close failed:', err));
         for (const s of scanners) s.close();
         server.closeAllConnections();
-        await server.close();
+        await Promise.all([server.close(), preview.close()]);
       })(),
       new Promise<void>((resolve) => setTimeout(resolve, 3000)),
     ]);
