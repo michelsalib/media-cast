@@ -5,7 +5,8 @@ import type {
   SubtitleSettingsPatch,
   SubtitleTiming,
 } from '../shared/subtitleSearch';
-import type { AppInfo, DevicesScanner, MainEvents } from '../shared/types';
+import type { AppInfo, DevicesScanner, MainEvents, ThemeSource } from '../shared/types';
+import { appearance, setThemeSource, setTitleBarColors } from './appearance';
 import { getBinaryPaths, getFfmpegVersion, probe, thumbnail } from './ffmpeg';
 import type { PlaybackController } from './PlaybackController';
 import type { PreviewServer } from './PreviewServer';
@@ -19,6 +20,7 @@ import {
 import { saveSubtitleSettings, subtitleSettingsView } from './subtitles/settings';
 
 export interface MainApiDeps {
+  window: BrowserWindow;
   controller: PlaybackController;
   preview: PreviewServer;
   scanners: readonly DevicesScanner[];
@@ -29,8 +31,12 @@ export interface MainApiDeps {
 // `ipcMain.handle` channel; the renderer client (src/renderer/src/ipc.ts) is
 // derived from `MainApi`, so adding a method here is the whole job.
 // Params must be structured-cloneable: paths as strings, never `File`.
-export function createMainApi({ controller, preview, scanners, updater }: MainApiDeps) {
+export function createMainApi({ window, controller, preview, scanners, updater }: MainApiDeps) {
   return {
+    appearance: () => appearance(),
+    setThemeSource: (themeSource: ThemeSource): void => setThemeSource(themeSource),
+    setTitleBarColors: (color: string, symbolColor: string): void =>
+      setTitleBarColors(window, color, symbolColor),
     appInfo: async (): Promise<AppInfo> => ({
       appVersion: app.getVersion(),
       ...getBinaryPaths(),

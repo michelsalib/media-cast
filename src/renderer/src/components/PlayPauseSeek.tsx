@@ -4,7 +4,7 @@ import {
   PlayArrowRounded,
   Replay10Rounded,
 } from '@mui/icons-material';
-import { CircularProgress, IconButton, Stack } from '@mui/material';
+import { alpha, CircularProgress, IconButton, Stack } from '@mui/material';
 import type { PlayerStatus } from '../../../shared/types';
 import { api } from '../ipc';
 
@@ -24,34 +24,47 @@ export default function PlayPauseSeek({ status }: Props): React.JSX.Element {
   }
 
   return (
-    <Stack direction="row" spacing={2.25} sx={{ alignItems: 'center' }}>
-      <IconButton aria-label="Back 10 seconds" onClick={() => seekBy(-10)} disabled={!known}>
-        <Replay10Rounded sx={{ fontSize: 32 }} />
+    <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
+      <IconButton
+        aria-label="Back 10 seconds"
+        onClick={() => seekBy(-10)}
+        disabled={!known}
+        sx={{ color: 'text.secondary' }}
+      >
+        <Replay10Rounded sx={{ fontSize: 30 }} />
       </IconButton>
       <IconButton
         aria-label={state === 'PLAYING' ? 'Pause' : 'Play'}
         onClick={() => void (state === 'PLAYING' ? api.pause() : api.play())}
         disabled={!known}
         sx={{
-          width: 68,
-          height: 68,
-          bgcolor: '#FFFFFF',
-          color: '#0B0C14',
-          boxShadow: '0 12px 30px rgba(0,0,0,0.4)',
-          '&:hover': { bgcolor: '#E8EAF2' },
-          '&.Mui-disabled': { bgcolor: 'rgba(255,255,255,0.85)', color: '#0B0C14' },
+          width: 64,
+          height: 64,
+          borderRadius: '20px',
+          bgcolor: 'primary.main',
+          color: 'primary.contrastText',
+          '&:hover': { bgcolor: (theme) => alpha(theme.palette.primary.main, 0.88) },
+          '&.Mui-disabled': {
+            bgcolor: 'tonal.primaryContainer',
+            color: 'tonal.onPrimaryContainer',
+          },
         }}
       >
         {!known ? (
-          <CircularProgress size={26} sx={{ color: '#0B0C14' }} />
+          <CircularProgress size={24} color="inherit" />
         ) : state === 'PLAYING' ? (
-          <PauseRounded sx={{ fontSize: 34 }} />
+          <PauseRounded sx={{ fontSize: 32 }} />
         ) : (
-          <PlayArrowRounded sx={{ fontSize: 38 }} />
+          <PlayArrowRounded sx={{ fontSize: 36 }} />
         )}
       </IconButton>
-      <IconButton aria-label="Forward 10 seconds" onClick={() => seekBy(10)} disabled={!known}>
-        <Forward10Rounded sx={{ fontSize: 32 }} />
+      <IconButton
+        aria-label="Forward 10 seconds"
+        onClick={() => seekBy(10)}
+        disabled={!known}
+        sx={{ color: 'text.secondary' }}
+      >
+        <Forward10Rounded sx={{ fontSize: 30 }} />
       </IconButton>
     </Stack>
   );

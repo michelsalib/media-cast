@@ -9,6 +9,7 @@ import {
 } from '@mui/icons-material';
 import {
   Alert,
+  alpha,
   Box,
   Button,
   ButtonBase,
@@ -26,7 +27,7 @@ import format from 'format-duration';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SubtitleCue, SubtitleTiming } from '../../../shared/subtitleSearch';
 import { api, errorMessage } from '../ipc';
-import { glassSx } from '../theme';
+import { tonalSx } from '../theme';
 import type { SubtitlesFile } from './SubtitlesSelection';
 
 export type SyncSource = { name: string; pathOrIndex: string | number };
@@ -219,11 +220,7 @@ export default function SubtitleSyncDialog({
         paper: {
           sx: {
             borderRadius: 0,
-            border: 0,
-            backgroundColor: '#0B0C14',
-            backgroundImage:
-              'radial-gradient(600px 360px at 10% 25%, rgba(46,95,138,0.35), transparent 70%),' +
-              'radial-gradient(380px 300px at 95% 55%, rgba(122,76,245,0.25), transparent 70%)',
+            bgcolor: 'tonal.surface',
           },
         },
       }}
@@ -232,14 +229,14 @@ export default function SubtitleSyncDialog({
       <Box sx={{ height: 32, flexShrink: 0, appRegion: 'drag' }} />
 
       <Stack direction="row" spacing={1.75} sx={{ alignItems: 'center', px: 4, pt: 1.5, pb: 2.25 }}>
-        <IconButton onClick={onClose} aria-label="Back" sx={glassSx}>
+        <IconButton onClick={onClose} aria-label="Back" sx={{ color: 'text.secondary' }}>
           <ArrowBackRounded />
         </IconButton>
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography variant="h1" sx={{ fontSize: 26 }}>
             Are the subtitles in time?
           </Typography>
-          <Typography noWrap sx={{ fontSize: 12, color: '#9DA2B8' }}>
+          <Typography noWrap sx={{ fontSize: 12, color: 'text.secondary' }}>
             {source?.name}
           </Typography>
         </Box>
@@ -265,9 +262,8 @@ export default function SubtitleSyncDialog({
               aspectRatio: '16 / 9',
               maxHeight: '52vh',
               backgroundColor: 'black',
-              borderRadius: '18px',
+              borderRadius: '16px',
               overflow: 'hidden',
-              boxShadow: '0 24px 60px rgba(0,0,0,0.5)',
             }}
           >
             {src && (
@@ -324,7 +320,12 @@ export default function SubtitleSyncDialog({
               onClick={togglePlay}
               disabled={!src}
               aria-label={playing ? 'Pause' : 'Play'}
-              sx={{ bgcolor: '#FFFFFF', color: '#0B0C14', '&:hover': { bgcolor: '#E8EAF2' } }}
+              sx={{
+                borderRadius: '14px',
+                bgcolor: 'primary.main',
+                color: 'primary.contrastText',
+                '&:hover': { bgcolor: (theme) => alpha(theme.palette.primary.main, 0.88) },
+              }}
             >
               {playing ? <PauseRounded /> : <PlayArrowRounded />}
             </IconButton>
@@ -351,11 +352,7 @@ export default function SubtitleSyncDialog({
               onChange={(_e, v) => setTime(v as number)}
               onChangeCommitted={(_e, v) => seek(v as number)}
               disabled={!src}
-              sx={{
-                mx: 1.5,
-                color: '#FFFFFF',
-                '& .MuiSlider-rail': { bgcolor: 'rgba(255,255,255,0.15)', opacity: 1 },
-              }}
+              sx={{ mx: 1.5 }}
             />
             <Typography
               sx={{
@@ -376,8 +373,8 @@ export default function SubtitleSyncDialog({
               alignItems: 'center',
               px: 2.25,
               py: 1.5,
-              borderRadius: '20px',
-              bgcolor: 'rgba(255,255,255,0.07)',
+              borderRadius: '24px',
+              bgcolor: 'tonal.surfaceContainer',
               flexShrink: 0,
             }}
           >
@@ -389,14 +386,14 @@ export default function SubtitleSyncDialog({
             >
               <Button
                 onClick={() => nudge(-1)}
-                sx={{ ...glassSx, minWidth: 0, px: 1.25, height: 32 }}
+                sx={[tonalSx, { minWidth: 0, px: 1.25, height: 32 }]}
               >
                 −1 s
               </Button>
               <IconButton
                 onClick={() => nudge(-0.1)}
                 aria-label="Earlier by 0.1 second"
-                sx={glassSx}
+                sx={tonalSx}
               >
                 <RemoveRounded />
               </IconButton>
@@ -414,12 +411,12 @@ export default function SubtitleSyncDialog({
                 </Typography>
                 <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>{offsetWord}</Typography>
               </Stack>
-              <IconButton onClick={() => nudge(0.1)} aria-label="Later by 0.1 second" sx={glassSx}>
+              <IconButton onClick={() => nudge(0.1)} aria-label="Later by 0.1 second" sx={tonalSx}>
                 <AddRounded />
               </IconButton>
               <Button
                 onClick={() => nudge(1)}
-                sx={{ ...glassSx, minWidth: 0, px: 1.25, height: 32 }}
+                sx={[tonalSx, { minWidth: 0, px: 1.25, height: 32 }]}
               >
                 +1 s
               </Button>
@@ -488,10 +485,11 @@ export default function SubtitleSyncDialog({
                     borderRadius: '16px',
                     fontSize: current ? 14 : 13,
                     fontWeight: current ? 600 : 400,
-                    color: current ? '#0B0C14' : '#E4E6F0',
-                    bgcolor: current ? '#FFFFFF' : 'rgba(255,255,255,0.08)',
-                    boxShadow: current ? '0 10px 24px rgba(0,0,0,0.35)' : 'none',
-                    '&:hover': { bgcolor: current ? '#FFFFFF' : 'rgba(255,255,255,0.14)' },
+                    color: current ? 'tonal.onPrimaryContainer' : 'tonal.onSurface',
+                    bgcolor: current ? 'tonal.primaryContainer' : 'tonal.surfaceContainer',
+                    '&:hover': {
+                      bgcolor: current ? 'tonal.primaryContainer' : 'tonal.surfaceContainerHigh',
+                    },
                   }}
                 >
                   <Box

@@ -65,4 +65,15 @@ export interface MainEvents {
   status: PlayerStatus;
   scan: Device[];
   updateReady: null;
+  // The OS accent colour changed (Windows), as `#rrggbb`.
+  accentColor: string;
+}
+
+// Mirrors Electron's `nativeTheme.themeSource`.
+export type ThemeSource = 'system' | 'light' | 'dark';
+
+export interface Appearance {
+  themeSource: ThemeSource;
+  // `#rrggbb`; undefined where the OS has no accent colour (Linux).
+  accentColor?: string;
 }

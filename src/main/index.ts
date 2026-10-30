@@ -25,6 +25,7 @@ configureBinaries({
 });
 
 import { createMainApi, registerMainApi, sendEvent } from './api';
+import { initialWindowColors, loadThemeSource, onAccentColorChanged } from './appearance';
 import { MediaServer } from './MediaServer';
 import { PlaybackController } from './PlaybackController';
 import { PreviewServer } from './PreviewServer';
@@ -48,13 +49,11 @@ function createWindow(): BrowserWindow {
     show: false,
     autoHideMenuBar: true,
     titleBarStyle: 'hidden',
-    ...(process.platform !== 'darwin' ? { titleBarOverlay: true } : {}),
     icon,
-    titleBarOverlay: {
-      color: '#181818',
-      symbolColor: '#ffffff',
-      height: 32,
-    },
+    backgroundColor: initialWindowColors().color,
+    ...(process.platform !== 'darwin'
+      ? { titleBarOverlay: { ...initialWindowColors(), height: 32 } }
+      : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: true,
@@ -91,7 +90,9 @@ app.whenReady().then(() => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 
+  loadThemeSource();
   const mainWindow = createWindow();
+  onAccentColorChanged((color) => sendEvent(mainWindow, 'accentColor', color));
 
   if (!is.dev) {
     autoUpdater.on('update-downloaded', () => {
@@ -145,7 +146,9 @@ app.whenReady().then(() => {
 
   const scanners: DevicesScanner[] = [chromecastScanner, upnpScanner];
 
-  registerMainApi(createMainApi({ controller, preview, scanners, updater: autoUpdater }));
+  registerMainApi(
+    createMainApi({ window: mainWindow, controller, preview, scanners, updater: autoUpdater })
+  );
 
   // Stop + UNSUBSCRIBE must reach the renderer, or the TV is left on a dead URL and
   // keeps NOTIFYing a closed port until the subscription expires. Run once, and hold

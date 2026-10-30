@@ -76,7 +76,13 @@ DLNA `protocolInfo` / `contentFeatures.dlna.org` values live in [upnp/dlna.ts](s
 
 State is flat — `useState` only, ownership by component:
 
-- [App.tsx](src/renderer/src/App.tsx) — owns the `Connection` (`{ device, state: CONNECTING | CONNECTED | DISCONNECTED }`) and `connect`/`stop`; draws the title bar over `<Dropper>`. Stop is `api.disconnect()` (there is no stop call) but the device stays picked, so Play reconnects to it. Theme and the shared `pillSx`/`glassSx` live in [theme.ts](src/renderer/src/theme.ts); Outfit is bundled via `@fontsource/outfit` (the CSP blocks font CDNs).
+- [App.tsx](src/renderer/src/App.tsx) — owns the `Connection` (`{ device, state: CONNECTING | CONNECTED | DISCONNECTED }`) and `connect`/`stop`; draws the title bar over `<Dropper>`. Stop is `api.disconnect()` (there is no stop call) but the device stays picked, so Play reconnects to it. Also owns appearance: the OS accent colour and the light/dark/system choice ([ThemeButton](src/renderer/src/components/ThemeButton.tsx) in the title bar).
+
+### Theme
+
+- [theme.ts](src/renderer/src/theme.ts) `makeTheme(mode, accent)` derives Material-style tonal roles (`theme.palette.tonal.*`: `primaryContainer`, `surfaceContainer`, `onSurfaceVariant`…) from one accent colour in OKLCH, so any accent gets readable light and dark palettes. Use the roles (`bgcolor: 'tonal.surfaceContainer'`) or `cardSx`/`chipSx`/`tonalSx`; never hard-code colours, both modes must work. Figtree is bundled via `@fontsource/figtree` (the CSP blocks font CDNs).
+- Main side is [appearance.ts](src/main/appearance.ts): accent from `systemPreferences.getAccentColor()` (Windows/macOS; Linux falls back to `DEFAULT_ACCENT`), pushed again on Windows' `accent-color-changed`. The theme choice is persisted in `userData/appearance.json` and applied as `nativeTheme.themeSource`, which is what flips the renderer's `prefers-color-scheme`. The renderer sends its surface colour back via `setTitleBarColors` so the Windows caption buttons match.
+- Driving the app with Playwright: call `page.emulateMedia({ colorScheme: null })` first, or its default light emulation masks `nativeTheme`. Launching Electron from a VS Code-spawned shell also needs `ELECTRON_RUN_AS_NODE` unset.
 - [Connector.tsx](src/renderer/src/components/Connector.tsx) — the device tiles. Subscribes `onEvent('scan')` and triggers an initial `refresh` on mount; a click calls App's `connect`. Keeps the picked device listed when a scan drops it.
 - [Dropper.tsx](src/renderer/src/components/Dropper.tsx) — the whole window below the title bar: views `empty` / `ready` / `playing`, the blurred-thumbnail backdrop, drag-and-drop ingestion, and subscribes `onEvent('status')`. Discriminator is filename suffix: `.mp4`/`.mkv`/`.avi` → video, `.srt`/`.vtt`/`.ass`/`.ssa` → subs, anything else is rejected with a message. AVI is UPnP-only (direct play if the Sink lists it, else transcode); a Chromecast load of an AVI throws. Thumbnail regenerated per video via `api.thumbnail`; the heading comes from `api.guessSubtitleQuery` (release-name parse), with the file name in Details.
 - [Player.tsx](src/renderer/src/components/Player.tsx) — the now-playing view, props only. The 1s ticker that drives between player-side status events lives in [PlaybackController](src/main/PlaybackController.ts), not the renderer.
@@ -91,7 +97,7 @@ Cross-process type imports (e.g. `import type { FFProbeData } from '../../../mai
 
 There is no channel list. The contract is the **handler map** returned by `createMainApi` in [src/main/api.ts](src/main/api.ts); its type `MainApi` is `ReturnType<typeof createMainApi>`.
 
-- **main** — `registerMainApi(api)` loops `ipcMain.handle` over the map, once, inside `whenReady`. Main → renderer pushes go through `sendEvent(window, channel, payload)`, typed by the small hand-written `MainEvents` interface in [src/shared/types.ts](src/shared/types.ts) (`status`, `scan`, `updateReady`).
+- **main** — `registerMainApi(api)` loops `ipcMain.handle` over the map, once, inside `whenReady`. Main → renderer pushes go through `sendEvent(window, channel, payload)`, typed by the small hand-written `MainEvents` interface in [src/shared/types.ts](src/shared/types.ts) (`status`, `scan`, `updateReady`, `accentColor`).
 - **preload** — generic `window.ipc` bridge (see Architecture). Never add per-method code here.
 - **renderer** — [src/renderer/src/ipc.ts](src/renderer/src/ipc.ts) exports `api` (a `Proxy` typed as `MainApi` with returns promisified and `Buffer` → `Uint8Array`), `onEvent(channel, cb) → unsubscribe`, and `pathFor(file)`. Fire-and-forget calls are written `void api.play()`.
 

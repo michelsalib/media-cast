@@ -54,7 +54,17 @@ export default function VideoInfoButton({ video, sx }: Props): React.JSX.Element
         ref={anchorRef}
         onClick={show}
         size="small"
-        sx={[{ color: 'text.secondary', fontWeight: 500 }, ...(Array.isArray(sx) ? sx : [sx])]}
+        variant="outlined"
+        sx={[
+          {
+            height: 32,
+            borderRadius: '8px',
+            color: 'text.secondary',
+            borderColor: 'tonal.outlineVariant',
+            fontWeight: 500,
+          },
+          ...(Array.isArray(sx) ? sx : [sx]),
+        ]}
       >
         Details
       </Button>

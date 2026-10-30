@@ -1,8 +1,9 @@
+import { CheckRounded } from '@mui/icons-material';
 import { Button, Stack } from '@mui/material';
 import { useEffect, useState } from 'react';
 import { api, pathFor } from '../ipc';
 import { channelsLabel, languageName } from '../labels';
-import { pillSx } from '../theme';
+import { chipSx } from '../theme';
 import type { AudioSelection } from './AudioSelection';
 
 type Props = {
@@ -69,7 +70,8 @@ export default function AudioSelector({ videoFile, onChange }: Props): React.JSX
             key={c.index}
             aria-pressed={selected}
             onClick={() => setChoice(c)}
-            sx={pillSx(selected)}
+            sx={chipSx(selected)}
+            startIcon={selected ? <CheckRounded /> : undefined}
           >
             {c.name}
           </Button>

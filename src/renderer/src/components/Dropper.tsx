@@ -1,13 +1,15 @@
 import {
-  AddRounded,
   ArrowBackRounded,
-  AutoAwesomeRounded,
   BoltRounded,
-  FileDownloadRounded,
+  FileDownloadOutlined,
+  FolderOpenOutlined,
+  MovieOutlined,
   PlayArrowRounded,
+  SyncRounded,
 } from '@mui/icons-material';
 import {
   Alert,
+  alpha,
   Backdrop,
   Box,
   Button,
@@ -27,8 +29,8 @@ import type { Device, PlayerStatus } from '../../../shared/types';
 import type { Connection } from '../App';
 import { api, errorMessage, onEvent, pathFor } from '../ipc';
 import { episodeLabel, resolutionLabel, runtimeLabel } from '../labels';
-import { glassSx } from '../theme';
-import { AmbientBackdrop, Artwork, useObjectUrl } from './Artwork';
+import { cardSx, tonalSx } from '../theme';
+import { Artwork, useObjectUrl } from './Artwork';
 import type { AudioSelection } from './AudioSelection';
 import AudioSelector from './AudioSelector';
 import Player from './Player';
@@ -132,8 +134,12 @@ export default function Dropper({
     setIsOver(false);
   }
 
-  function browse(): void {
-    fileInput.current?.click();
+  // One hidden input for every picker; `accept` narrows it to what the button offers.
+  function browse(extensions = [...VIDEO_EXTENSIONS, ...SUBTITLE_EXTENSIONS]): void {
+    const input = fileInput.current;
+    if (!input) return;
+    input.accept = extensions.join(',');
+    input.click();
   }
 
   function onFilesPicked(event: React.ChangeEvent<HTMLInputElement>): void {
@@ -271,7 +277,6 @@ export default function Dropper({
       onDragLeave={dragLeave}
       sx={{ height: '100%', position: 'relative', overflow: 'hidden' }}
     >
-      <AmbientBackdrop url={view === 'playing' ? nowPlayingUrl : thumbnailUrl} />
       <input
         ref={fileInput}
         type="file"
@@ -282,7 +287,7 @@ export default function Dropper({
       />
 
       {/* 32px: the title bar drawn over this by App. */}
-      <Stack sx={{ position: 'relative', zIndex: 1, height: '100%', pt: '32px' }}>
+      <Stack sx={{ height: '100%', pt: '32px' }}>
         {view === 'playing' && status && device && (
           <Player
             status={status}
@@ -290,70 +295,80 @@ export default function Dropper({
             artworkUrl={nowPlayingUrl}
             title={nowPlaying?.title || status.title || 'Now playing'}
             details={nowPlaying?.details}
-            onBrowse={browse}
+            onBrowse={() => browse()}
             onStop={onStop}
           />
         )}
 
         {view === 'empty' && (
-          <Stack sx={{ flex: 1, minHeight: 0, px: 4 }}>
+          <Stack spacing={1.5} sx={{ flex: 1, minHeight: 0, px: 2.5, pt: 1, pb: 2.5 }}>
             <Stack
+              spacing={1.5}
               sx={{
+                ...cardSx,
+                borderRadius: '28px',
                 flex: 1,
                 minHeight: 0,
                 alignItems: 'center',
                 justifyContent: 'center',
                 textAlign: 'center',
+                px: 3,
               }}
             >
-              <Illustration />
-              <Typography variant="h1" sx={{ mt: 2.5 }}>
-                What are we watching?
-              </Typography>
-              <Typography sx={{ mt: 1.25, fontSize: 16, color: 'text.secondary' }}>
-                Drop a movie or an episode anywhere in this window.
+              <Box
+                sx={{
+                  width: 72,
+                  height: 72,
+                  borderRadius: '24px',
+                  display: 'grid',
+                  placeItems: 'center',
+                  bgcolor: 'tonal.primaryContainer',
+                  color: 'tonal.onPrimaryContainer',
+                  mb: 1,
+                }}
+              >
+                <MovieOutlined sx={{ fontSize: 36 }} />
+              </Box>
+              <Typography variant="h1">Drop a video here</Typography>
+              <Typography sx={{ color: 'text.secondary', maxWidth: 420 }}>
+                A movie or an episode, in MP4, MKV or AVI. Drop its subtitle file along with it, or
+                find subtitles online afterwards.
               </Typography>
               <Button
-                size="large"
-                onClick={browse}
-                startIcon={<AddRounded />}
-                sx={{
-                  mt: 3,
-                  bgcolor: '#FFFFFF',
-                  color: '#0B0C14',
-                  '&:hover': { bgcolor: '#E8EAF2' },
-                }}
+                variant="contained"
+                onClick={() => browse()}
+                startIcon={<FolderOpenOutlined />}
+                sx={{ mt: 1.5, height: 48, px: 3, fontSize: 15 }}
               >
                 Choose a video
               </Button>
-              <Typography sx={{ mt: 1.5, fontSize: 12, color: '#9DA2B8' }}>
-                Subtitles too — drop them in with the video, or find them online later.
-              </Typography>
             </Stack>
-            <Box sx={{ pb: 3.5 }}>{devices('Ready to play on')}</Box>
+            {devices('Play on')}
           </Stack>
         )}
 
         {view === 'ready' && video && (
           <Stack sx={{ flex: 1, minHeight: 0 }}>
-            <Stack
-              spacing={3.25}
-              sx={{ flex: 1, minHeight: 0, overflowY: 'auto', px: 4, pt: 2.25, pb: 2 }}
-            >
+            <Stack spacing={1.5} sx={{ flex: 1, minHeight: 0, overflowY: 'auto', px: 2.5, pt: 1 }}>
               {active && (
                 <Button
                   onClick={() => setBrowsing(false)}
                   startIcon={<ArrowBackRounded />}
-                  sx={{ ...glassSx, alignSelf: 'flex-start', height: 32 }}
+                  sx={[tonalSx, { alignSelf: 'flex-start', flexShrink: 0 }]}
                 >
-                  Now playing
+                  Back to what’s playing
                 </Button>
               )}
-              <Stack direction="row" spacing={3.5} sx={{ alignItems: 'flex-end' }}>
-                <Artwork url={thumbnailUrl} sx={{ width: 'min(320px, 38%)' }} />
-                <Stack spacing={1} sx={{ flex: 1, minWidth: 0, pb: 0.5 }}>
+
+              <Stack
+                direction="row"
+                spacing={2.5}
+                sx={{ ...cardSx, p: 2, borderRadius: '28px', alignItems: 'center', flexShrink: 0 }}
+              >
+                <Artwork url={thumbnailUrl} sx={{ width: 'min(272px, 40%)' }} />
+                <Stack spacing={0.75} sx={{ flex: 1, minWidth: 0 }}>
                   {eyebrow && (
-                    <Typography sx={{ fontSize: 13, fontWeight: 500, color: 'primary.light' }}>
+                    <Typography sx={{ fontSize: 13, fontWeight: 600, color: 'primary.main' }}>
                       {eyebrow}
                     </Typography>
                   )}
@@ -374,20 +389,14 @@ export default function Dropper({
                   <Stack
                     direction="row"
                     useFlexGap
-                    sx={{
-                      gap: 0.5,
-                      mt: 0.75,
-                      ml: compat && device ? 0 : -2,
-                      flexWrap: 'wrap',
-                      alignItems: 'center',
-                    }}
+                    sx={{ gap: 1, mt: 1, flexWrap: 'wrap', alignItems: 'center' }}
                   >
-                    {compat && device && <CompatPill report={compat} deviceName={device.name} />}
+                    {compat && device && <CompatChip report={compat} deviceName={device.name} />}
                     <VideoInfoButton video={video} />
                     <Button
                       size="small"
-                      onClick={browse}
-                      sx={{ color: 'text.secondary', fontWeight: 500 }}
+                      onClick={() => browse()}
+                      sx={{ height: 32, borderRadius: '8px', color: 'primary.main' }}
                     >
                       Change
                     </Button>
@@ -395,91 +404,127 @@ export default function Dropper({
                 </Stack>
               </Stack>
 
-              <Stack spacing={2}>
+              <Box
+                sx={{
+                  display: 'grid',
+                  gridTemplateColumns: hasAudio
+                    ? 'repeat(auto-fit, minmax(280px, 1fr))'
+                    : 'minmax(0, 1fr)',
+                  gap: 1.5,
+                  alignItems: 'start',
+                  pb: 1.5,
+                }}
+              >
                 {hasAudio && (
-                  <TrackRow label="Audio">
+                  <Section title="Audio">
                     <AudioSelector videoFile={video} onChange={setAudioSelection} />
-                  </TrackRow>
+                  </Section>
                 )}
-                <TrackRow label="Subtitles">
-                  <Stack spacing={1.25}>
-                    <SubtitlesSelector
-                      subFile={subs}
-                      videoFile={video}
-                      deviceType={device?.type}
-                      onChange={setSubtitlesSelection}
-                    />
-                    <Stack
-                      direction="row"
-                      useFlexGap
-                      sx={{ gap: 2.25, alignItems: 'center', flexWrap: 'wrap', minHeight: 32 }}
-                    >
-                      <Link component="button" onClick={() => setSearchOpen(true)} sx={linkSx}>
-                        Find more online
-                      </Link>
-                      {syncableSelection && (
+                <Section
+                  title="Subtitles"
+                  actions={
+                    <>
+                      <Tooltip title="Load an SRT, VTT, ASS or SSA file from your computer">
                         <Link
                           component="button"
-                          onClick={() => setSyncSource(syncableSelection)}
+                          onClick={() => browse(SUBTITLE_EXTENSIONS)}
                           sx={linkSx}
                         >
-                          Adjust timing
+                          Load file
                         </Link>
-                      )}
-                      {showBurnToggle && (
-                        <Tooltip
-                          placement="top"
-                          enterDelay={300}
-                          title={
-                            forceBurn
-                              ? 'These subtitles are images (e.g. Blu-ray PGS) — they can only be shown by burning them into the video.'
-                              : 'Re-encodes the video to embed subtitles. Needed only for TVs that ignore separate subtitle files.'
-                          }
-                        >
-                          <FormControlLabel
-                            control={
-                              <Switch
-                                size="small"
-                                checked={effectiveBurn}
-                                disabled={forceBurn}
-                                onChange={(e) => setBurnSubtitles(e.target.checked)}
-                              />
-                            }
-                            label="Burn into the picture"
-                            slotProps={{ typography: { sx: { fontSize: 13 } } }}
-                            sx={{ m: 0, gap: 0.5 }}
+                      </Tooltip>
+                      <Link component="button" onClick={() => setSearchOpen(true)} sx={linkSx}>
+                        Find online
+                      </Link>
+                      {/* Always shown so it can be found; text tracks only (image
+                          subtitles have no lines to retime). */}
+                      <Tooltip
+                        title={
+                          syncableSelection
+                            ? 'Preview the subtitles over the video and shift them in sync'
+                            : hasSubs
+                              ? 'These subtitles are images (e.g. Blu-ray), so they can’t be retimed. Find text subtitles online instead.'
+                              : 'Pick subtitles to check their timing'
+                        }
+                      >
+                        <span>
+                          <Link
+                            component="button"
+                            disabled={!syncableSelection}
+                            onClick={() => syncableSelection && setSyncSource(syncableSelection)}
+                            sx={[
+                              linkSx,
+                              !syncableSelection && { color: 'text.disabled', cursor: 'default' },
+                            ]}
+                          >
+                            Fix timing
+                          </Link>
+                        </span>
+                      </Tooltip>
+                    </>
+                  }
+                >
+                  <SubtitlesSelector
+                    subFile={subs}
+                    videoFile={video}
+                    deviceType={device?.type}
+                    onChange={setSubtitlesSelection}
+                  />
+                  {showBurnToggle && (
+                    <Tooltip
+                      placement="top"
+                      enterDelay={300}
+                      title={
+                        forceBurn
+                          ? 'These subtitles are images (e.g. Blu-ray PGS) — they can only be shown by burning them into the video.'
+                          : 'Re-encodes the video to embed subtitles. Needed only for TVs that ignore separate subtitle files.'
+                      }
+                    >
+                      <FormControlLabel
+                        control={
+                          <Switch
+                            size="small"
+                            checked={effectiveBurn}
+                            disabled={forceBurn}
+                            onChange={(e) => setBurnSubtitles(e.target.checked)}
                           />
-                        </Tooltip>
-                      )}
-                    </Stack>
-                  </Stack>
-                </TrackRow>
-              </Stack>
+                        }
+                        label="Burn into the picture"
+                        slotProps={{ typography: { sx: { fontSize: 13 } } }}
+                        sx={{ m: 0, mt: 1, gap: 0.5, alignSelf: 'flex-start' }}
+                      />
+                    </Tooltip>
+                  )}
+                </Section>
+              </Box>
             </Stack>
 
             <Stack
               direction="row"
               spacing={2}
-              sx={{ alignItems: 'flex-end', px: 4, pt: 1, pb: 3.5 }}
+              sx={{ alignItems: 'flex-end', px: 2.5, pt: 1, pb: 2.5 }}
             >
               <Box sx={{ flex: 1, minWidth: 0 }}>{devices('Play on')}</Box>
-              <Button
-                variant="contained"
-                size="large"
-                onClick={() => void play()}
-                disabled={!canPlay}
-                startIcon={
-                  casting ? <CircularProgress size={18} color="inherit" /> : <PlayArrowRounded />
-                }
-                sx={{ flexShrink: 0, maxWidth: 300, mb: 0.75 }}
-              >
-                <Box
-                  component="span"
-                  sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                >
-                  {device ? `Play on ${device.name}` : 'Pick a screen'}
-                </Box>
-              </Button>
+              <Tooltip title={device ? '' : 'Pick a screen first'} placement="top">
+                <span>
+                  <Button
+                    variant="contained"
+                    size="large"
+                    onClick={() => void play()}
+                    disabled={!canPlay}
+                    startIcon={
+                      casting ? (
+                        <CircularProgress size={20} color="inherit" />
+                      ) : (
+                        <PlayArrowRounded sx={{ '&&': { fontSize: 26 } }} />
+                      )
+                    }
+                    sx={{ mb: 0.5 }}
+                  >
+                    Play
+                  </Button>
+                </span>
+              </Tooltip>
             </Stack>
           </Stack>
         )}
@@ -518,8 +563,7 @@ export default function Dropper({
       <Backdrop
         open={isOver}
         sx={(theme) => ({
-          backgroundColor: 'rgba(11,12,20,0.7)',
-          backdropFilter: 'blur(6px)',
+          backgroundColor: alpha(theme.palette.tonal.surface, 0.85),
           flexDirection: 'column',
           gap: 2,
           zIndex: theme.zIndex.modal + 1,
@@ -527,18 +571,16 @@ export default function Dropper({
       >
         <Box
           sx={{
-            width: 88,
-            height: 88,
-            borderRadius: '50%',
+            width: 96,
+            height: 96,
+            borderRadius: '28px',
             display: 'grid',
             placeItems: 'center',
-            color: 'primary.main',
-            border: '2px dashed',
-            borderColor: 'primary.main',
-            bgcolor: 'rgba(94,242,192,0.1)',
+            bgcolor: 'tonal.primaryContainer',
+            color: 'tonal.onPrimaryContainer',
           }}
         >
-          <FileDownloadRounded sx={{ fontSize: 40 }} />
+          <FileDownloadOutlined sx={{ fontSize: 44 }} />
         </Box>
         <Typography variant="h2">Drop it here</Typography>
       </Backdrop>
@@ -546,89 +588,35 @@ export default function Dropper({
   );
 }
 
-const linkSx = { fontSize: 13, fontWeight: 500, fontFamily: 'inherit' } as const;
+const linkSx = {
+  fontSize: 13,
+  fontWeight: 600,
+  fontFamily: 'inherit',
+  textDecoration: 'none',
+  '&:hover': { textDecoration: 'underline' },
+} as const;
 
-function TrackRow({
-  label,
+function Section({
+  title,
+  actions,
   children,
 }: {
-  label: string;
+  title: string;
+  actions?: React.ReactNode;
   children: React.ReactNode;
 }): React.JSX.Element {
   return (
-    <Stack direction="row" spacing={1.75} sx={{ alignItems: 'flex-start' }}>
-      <Typography sx={{ width: 82, flexShrink: 0, pt: 1, fontSize: 13, color: 'text.secondary' }}>
-        {label}
-      </Typography>
-      <Box sx={{ flex: 1, minWidth: 0 }}>{children}</Box>
+    <Stack spacing={1.5} sx={{ ...cardSx, p: 2, minWidth: 0 }}>
+      <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
+        <Typography sx={{ fontWeight: 600, flex: 1 }}>{title}</Typography>
+        {actions}
+      </Stack>
+      {children}
     </Stack>
   );
 }
 
-// Decorative: a few poster cards fanned out, the front one with a play button.
-function Illustration(): React.JSX.Element {
-  const card = {
-    position: 'absolute',
-    top: 34,
-    width: 150,
-    height: 100,
-    borderRadius: '16px',
-    boxShadow: '0 18px 40px rgba(0,0,0,0.45)',
-  } as const;
-  return (
-    <Box aria-hidden sx={{ position: 'relative', width: 300, height: 160, flexShrink: 0 }}>
-      <Box
-        sx={{
-          ...card,
-          left: 10,
-          transform: 'rotate(-12deg)',
-          background: 'linear-gradient(160deg, #FF8A5B 0%, #E5487A 55%, #5B2A86 100%)',
-        }}
-      />
-      <Box
-        sx={{
-          ...card,
-          right: 10,
-          transform: 'rotate(12deg)',
-          background: 'linear-gradient(160deg, #6FD3FF 0%, #2E6BE6 60%, #1A2A6B 100%)',
-        }}
-      />
-      <Box
-        sx={{
-          ...card,
-          top: 14,
-          left: 65,
-          width: 170,
-          height: 114,
-          borderRadius: '18px',
-          display: 'grid',
-          placeItems: 'center',
-          background:
-            'radial-gradient(120% 60% at 20% 20%, rgba(94,242,192,0.7), transparent 60%),' +
-            'radial-gradient(90% 50% at 85% 10%, rgba(181,108,245,0.7), transparent 60%),' +
-            'linear-gradient(180deg, #0A0F2C 0%, #162B5C 50%, #0B1622 100%)',
-          boxShadow: '0 24px 50px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.12)',
-        }}
-      >
-        <Box
-          sx={{
-            width: 44,
-            height: 44,
-            borderRadius: '50%',
-            bgcolor: 'rgba(255,255,255,0.92)',
-            color: '#0B0C14',
-            display: 'grid',
-            placeItems: 'center',
-          }}
-        >
-          <PlayArrowRounded />
-        </Box>
-      </Box>
-    </Box>
-  );
-}
-
-function CompatPill({
+function CompatChip({
   report,
   deviceName,
 }: {
@@ -647,28 +635,13 @@ function CompatPill({
             {transcoding ? 'Transcoding required' : 'Direct play'}
           </Box>
           <Stack spacing={0.25} sx={{ fontSize: 12 }}>
-            <Box>
-              <Box component="span" sx={{ color: 'text.secondary' }}>
-                Container:{' '}
-              </Box>
-              {report.container || 'unknown'}
-            </Box>
-            <Box>
-              <Box component="span" sx={{ color: 'text.secondary' }}>
-                Video:{' '}
-              </Box>
-              {report.videoCodec ?? 'unknown'}
-            </Box>
-            <Box>
-              <Box component="span" sx={{ color: 'text.secondary' }}>
-                Audio:{' '}
-              </Box>
-              {report.audioCodec ?? 'unknown'}
-            </Box>
+            <Box>Container: {report.container || 'unknown'}</Box>
+            <Box>Video: {report.videoCodec ?? 'unknown'}</Box>
+            <Box>Audio: {report.audioCodec ?? 'unknown'}</Box>
           </Stack>
           {report.issues.length > 0 && (
-            <Box sx={{ mt: 1, pt: 0.75, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
-              <Box sx={{ fontSize: 11, color: 'text.secondary', mb: 0.25 }}>Why re-encode</Box>
+            <Box sx={{ mt: 1, pt: 0.75, borderTop: '1px solid', borderColor: 'currentColor' }}>
+              <Box sx={{ fontSize: 11, opacity: 0.8, mb: 0.25 }}>Why re-encode</Box>
               <Stack component="ul" sx={{ pl: 2, m: 0, fontSize: 12 }} spacing={0.25}>
                 {report.issues.map((issue) => (
                   <li key={issue.kind}>{issue.detail}</li>
@@ -683,28 +656,28 @@ function CompatPill({
         direction="row"
         spacing={0.75}
         sx={{
-          height: 28,
+          height: 32,
           px: 1.5,
-          mr: 0.5,
           alignItems: 'center',
-          borderRadius: 999,
-          bgcolor: 'rgba(255,255,255,0.1)',
-          fontSize: 12,
-          color: '#E4E6F0',
+          borderRadius: '8px',
+          bgcolor: 'tonal.secondaryContainer',
+          color: 'tonal.onSecondaryContainer',
+          fontSize: 13,
+          fontWeight: 500,
           cursor: 'help',
           minWidth: 0,
         }}
       >
         {transcoding ? (
-          <AutoAwesomeRounded sx={{ fontSize: 14 }} />
+          <SyncRounded sx={{ fontSize: 16 }} />
         ) : (
-          <BoltRounded sx={{ fontSize: 14, color: 'primary.main' }} />
+          <BoltRounded sx={{ fontSize: 16 }} />
         )}
         <Box
           component="span"
           sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
         >
-          {transcoding ? `We’ll convert it for ${deviceName}` : `Plays directly on ${deviceName}`}
+          {transcoding ? `Converted for ${deviceName}` : `Plays directly on ${deviceName}`}
         </Box>
       </Stack>
     </Tooltip>

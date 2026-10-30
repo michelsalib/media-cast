@@ -22,7 +22,7 @@ import {
   subtitleLanguageName,
 } from '../../../shared/subtitleSearch';
 import { api, errorMessage } from '../ipc';
-import { glassSx } from '../theme';
+import { tonalSx } from '../theme';
 import LanguagesInput from './LanguagesInput';
 import SubtitleSettingsDialog from './SubtitleSettingsDialog';
 import type { SubtitlesFile } from './SubtitlesSelection';
@@ -127,7 +127,6 @@ export default function SubtitleSearchDialog({
       open={open}
       onClose={onClose}
       slotProps={{
-        backdrop: { sx: { backgroundColor: 'rgba(6,7,12,0.55)' } },
         paper: {
           sx: {
             top: 44,
@@ -135,12 +134,9 @@ export default function SubtitleSearchDialog({
             bottom: 12,
             height: 'auto',
             width: 'min(460px, calc(100% - 24px))',
-            borderRadius: '24px',
+            borderRadius: '28px',
             backgroundImage: 'none',
-            backgroundColor: 'rgba(24,26,40,0.94)',
-            backdropFilter: 'blur(30px)',
-            border: '1px solid rgba(255,255,255,0.08)',
-            boxShadow: '0 30px 80px rgba(0,0,0,0.55)',
+            bgcolor: 'tonal.surfaceContainerLow',
           },
         },
       }}
@@ -154,11 +150,11 @@ export default function SubtitleSearchDialog({
           Find subtitles
         </Typography>
         <Tooltip title="Languages, accounts and API keys">
-          <IconButton onClick={() => setSettingsOpen(true)} sx={glassSx}>
+          <IconButton onClick={() => setSettingsOpen(true)} sx={{ color: 'text.secondary' }}>
             <TuneRounded fontSize="small" />
           </IconButton>
         </Tooltip>
-        <IconButton onClick={onClose} aria-label="close" sx={glassSx}>
+        <IconButton onClick={onClose} aria-label="close" sx={{ color: 'text.secondary' }}>
           <CloseRounded fontSize="small" />
         </IconButton>
       </Stack>
@@ -262,10 +258,10 @@ export default function SubtitleSearchDialog({
       {!!response?.notices.length && (
         <Stack
           spacing={0.25}
-          sx={{ px: 3, py: 1.75, borderTop: '1px solid rgba(255,255,255,0.08)' }}
+          sx={{ px: 3, py: 1.75, borderTop: '1px solid', borderColor: 'divider' }}
         >
           {response.notices.map((n) => (
-            <Typography key={n.provider} sx={{ fontSize: 12, color: '#9DA2B8' }}>
+            <Typography key={n.provider} sx={{ fontSize: 12, color: 'text.secondary' }}>
               {SUBTITLE_PROVIDER_NAMES[n.provider]}: {n.message}
             </Typography>
           ))}
@@ -318,13 +314,9 @@ function ResultRow({
         pl: 2,
         pr: 1.5,
         py: highlight ? 1.75 : 1.25,
-        borderRadius: highlight ? '18px' : '16px',
-        background: highlight
-          ? `linear-gradient(135deg, rgba(94,242,192,${highlight === 'strong' ? 0.18 : 0.1}), rgba(181,108,245,${highlight === 'strong' ? 0.14 : 0.08}))`
-          : 'rgba(255,255,255,0.05)',
-        boxShadow: highlight
-          ? `inset 0 0 0 1px rgba(94,242,192,${highlight === 'strong' ? 0.35 : 0.2})`
-          : 'none',
+        borderRadius: '16px',
+        bgcolor: highlight ? 'tonal.primaryContainer' : 'tonal.surfaceContainerHigh',
+        color: highlight ? 'tonal.onPrimaryContainer' : 'tonal.onSurface',
       }}
     >
       <Stack spacing={0.25} sx={{ flex: 1, minWidth: 0 }}>
@@ -332,7 +324,7 @@ function ResultRow({
           <Typography sx={{ fontWeight: 600, fontSize: 15 }}>
             {subtitleLanguageName(result.language)}
             {result.hearingImpaired && (
-              <Box component="span" sx={{ fontWeight: 400, color: 'text.secondary' }}>
+              <Box component="span" sx={{ fontWeight: 400, opacity: 0.8 }}>
                 {' '}
                 · with sound descriptions
               </Box>
@@ -344,7 +336,7 @@ function ResultRow({
                 sx={{
                   height: 20,
                   px: 1,
-                  borderRadius: 999,
+                  borderRadius: '6px',
                   bgcolor: 'primary.main',
                   color: 'primary.contrastText',
                   fontSize: 11,
@@ -359,11 +351,7 @@ function ResultRow({
             </Tooltip>
           )}
         </Stack>
-        <Typography
-          noWrap
-          title={result.release}
-          sx={{ fontSize: 12, color: highlight ? 'text.secondary' : '#9DA2B8' }}
-        >
+        <Typography noWrap title={result.release} sx={{ fontSize: 12, opacity: 0.75 }}>
           {facts.join(' · ')}
         </Typography>
       </Stack>
@@ -371,13 +359,7 @@ function ResultRow({
         onClick={onUse}
         disabled={disabled}
         variant={highlight === 'strong' ? 'contained' : 'text'}
-        sx={{
-          height: 36,
-          minWidth: 64,
-          flexShrink: 0,
-          boxShadow: 'none',
-          ...(highlight !== 'strong' && glassSx),
-        }}
+        sx={[{ height: 36, minWidth: 64, flexShrink: 0 }, highlight === 'strong' ? {} : tonalSx]}
       >
         {downloading ? <CircularProgress size={16} color="inherit" /> : 'Use'}
       </Button>

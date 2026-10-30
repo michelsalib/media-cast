@@ -1,10 +1,10 @@
-import { AutoAwesomeRounded, StopRounded, VideoLibraryRounded } from '@mui/icons-material';
+import { StopRounded, SyncRounded, VideoLibraryOutlined } from '@mui/icons-material';
 import { Box, Button, Slider, Stack, Tooltip, Typography } from '@mui/material';
 import format from 'format-duration';
 import { useState } from 'react';
 import type { Device, PlayerStatus } from '../../../shared/types';
 import { api } from '../ipc';
-import { glassSx } from '../theme';
+import { cardSx, tonalSx } from '../theme';
 import { Artwork } from './Artwork';
 import PlayPause from './PlayPauseSeek';
 
@@ -47,79 +47,86 @@ export default function Player({
   }
 
   return (
-    <Stack sx={{ height: '100%', alignItems: 'center', px: 5, pt: 1.5, pb: 3, minHeight: 0 }}>
-      {/* Shrinks on short windows so the controls stay on screen. */}
-      <Artwork
-        url={artworkUrl}
-        sx={{ width: 'min(420px, 100%, (100vh - 420px) * 16 / 9)', borderRadius: '20px' }}
-      />
-
-      <Stack direction="row" spacing={1} sx={{ mt: 2.5, alignItems: 'center' }}>
-        <Stack
-          direction="row"
-          spacing={1}
-          sx={{
-            height: 30,
-            px: 1.75,
-            alignItems: 'center',
-            borderRadius: 999,
-            bgcolor: 'rgba(255,255,255,0.1)',
-            fontSize: 13,
-            fontWeight: 500,
-          }}
-        >
-          <Box
-            sx={{
-              width: 8,
-              height: 8,
-              borderRadius: '50%',
-              bgcolor: 'primary.main',
-              boxShadow: '0 0 0 4px rgba(94,242,192,0.25)',
-            }}
-          />
-          <span>
-            {STATE_LABELS[status.playerState]} {device.name}
-          </span>
-        </Stack>
-        {status.transcoded && (
-          <Tooltip title="ffmpeg is re-encoding this file on the fly for the TV">
+    <Stack spacing={1.5} sx={{ flex: 1, minHeight: 0, px: 2.5, pt: 1, pb: 2.5 }}>
+      <Stack
+        direction="row"
+        spacing={2.5}
+        sx={{ ...cardSx, p: 2, borderRadius: '28px', alignItems: 'center', flex: 1, minHeight: 0 }}
+      >
+        <Artwork url={artworkUrl} sx={{ width: 'min(400px, 48%)' }} />
+        <Stack spacing={1} sx={{ flex: 1, minWidth: 0 }}>
+          <Stack direction="row" useFlexGap sx={{ gap: 1, flexWrap: 'wrap' }}>
             <Stack
               direction="row"
-              spacing={0.75}
+              spacing={1}
               sx={{
-                height: 30,
+                height: 32,
                 px: 1.5,
                 alignItems: 'center',
-                borderRadius: 999,
-                bgcolor: 'rgba(255,255,255,0.1)',
+                borderRadius: '8px',
+                bgcolor: 'tonal.primaryContainer',
+                color: 'tonal.onPrimaryContainer',
                 fontSize: 13,
-                color: 'text.secondary',
+                fontWeight: 600,
+                minWidth: 0,
               }}
             >
-              <AutoAwesomeRounded sx={{ fontSize: 14 }} />
-              <span>Converting</span>
+              <Box
+                sx={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: '50%',
+                  bgcolor: 'currentColor',
+                  flexShrink: 0,
+                }}
+              />
+              <Box
+                component="span"
+                sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+              >
+                {STATE_LABELS[status.playerState]} {device.name}
+              </Box>
             </Stack>
-          </Tooltip>
-        )}
+            {status.transcoded && (
+              <Tooltip title="ffmpeg is re-encoding this file on the fly for the TV">
+                <Stack
+                  direction="row"
+                  spacing={0.75}
+                  sx={{
+                    height: 32,
+                    px: 1.5,
+                    alignItems: 'center',
+                    borderRadius: '8px',
+                    bgcolor: 'tonal.secondaryContainer',
+                    color: 'tonal.onSecondaryContainer',
+                    fontSize: 13,
+                    fontWeight: 500,
+                  }}
+                >
+                  <SyncRounded sx={{ fontSize: 16 }} />
+                  <span>Converting</span>
+                </Stack>
+              </Tooltip>
+            )}
+          </Stack>
+          <Typography
+            variant="h1"
+            title={title}
+            sx={{
+              display: '-webkit-box',
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: 'vertical',
+              overflow: 'hidden',
+              wordBreak: 'break-word',
+            }}
+          >
+            {title}
+          </Typography>
+          {details && <Typography sx={{ color: 'text.secondary' }}>{details}</Typography>}
+        </Stack>
       </Stack>
 
-      <Typography
-        variant="h1"
-        noWrap
-        sx={{ mt: 1.5, fontSize: 32, maxWidth: '100%' }}
-        title={title}
-      >
-        {title}
-      </Typography>
-      {details && (
-        <Typography sx={{ mt: 0.5, color: 'text.secondary' }} noWrap>
-          {details}
-        </Typography>
-      )}
-
-      <Box sx={{ flex: 1, minHeight: 16 }} />
-
-      <Box sx={{ alignSelf: 'stretch' }}>
+      <Box sx={{ ...cardSx, px: 2.5, pt: 1.5, pb: 2, flexShrink: 0 }}>
         <Slider
           aria-label="Position"
           min={0}
@@ -128,18 +135,7 @@ export default function Player({
           disabled={!duration}
           onChange={(_evt, value) => setDragValue(value)}
           onChangeCommitted={seek}
-          sx={{
-            height: 6,
-            py: 1,
-            '& .MuiSlider-rail': { bgcolor: 'rgba(255,255,255,0.15)', opacity: 1 },
-            '& .MuiSlider-track': { border: 0 },
-            '& .MuiSlider-thumb': {
-              width: 16,
-              height: 16,
-              bgcolor: '#FFFFFF',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
-            },
-          }}
+          sx={{ height: 6, py: 1 }}
         />
         <Stack
           direction="row"
@@ -153,34 +149,28 @@ export default function Player({
           <span>{format(position * 1000)}</span>
           <span>{duration ? `−${format(Math.max(0, duration - position) * 1000)}` : ''}</span>
         </Stack>
-      </Box>
-
-      <Box
-        sx={{
-          alignSelf: 'stretch',
-          display: 'grid',
-          gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-          alignItems: 'center',
-          mt: 1,
-        }}
-      >
-        <Box>
-          <Button
-            onClick={onBrowse}
-            startIcon={<VideoLibraryRounded />}
-            sx={{ ...glassSx, height: 38 }}
-          >
-            Another video
-          </Button>
+        <Box
+          sx={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+            alignItems: 'center',
+            mt: 0.5,
+          }}
+        >
+          <Box>
+            <Button onClick={onBrowse} startIcon={<VideoLibraryOutlined />} sx={tonalSx}>
+              Another video
+            </Button>
+          </Box>
+          <Stack sx={{ alignItems: 'center' }}>
+            <PlayPause status={status} />
+          </Stack>
+          <Stack direction="row" sx={{ justifyContent: 'flex-end' }}>
+            <Button onClick={onStop} startIcon={<StopRounded />} sx={tonalSx}>
+              Stop
+            </Button>
+          </Stack>
         </Box>
-        <Stack sx={{ alignItems: 'center' }}>
-          <PlayPause status={status} />
-        </Stack>
-        <Stack direction="row" sx={{ justifyContent: 'flex-end' }}>
-          <Button onClick={onStop} startIcon={<StopRounded />} sx={{ ...glassSx, height: 38 }}>
-            Stop
-          </Button>
-        </Stack>
       </Box>
     </Stack>
   );

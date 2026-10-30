@@ -1,13 +1,5 @@
-import { Cast, CheckRounded, Tv } from '@mui/icons-material';
-import {
-  Box,
-  Button,
-  ButtonBase,
-  CircularProgress,
-  keyframes,
-  Stack,
-  Typography,
-} from '@mui/material';
+import { Cast, Tv } from '@mui/icons-material';
+import { alpha, Button, ButtonBase, CircularProgress, Stack, Typography } from '@mui/material';
 import { useEffect, useState } from 'react';
 import type { Device } from '../../../shared/types';
 import type { Connection } from '../App';
@@ -19,16 +11,7 @@ type Props = {
   onSelect: (device: Device) => void;
 };
 
-const pulse = keyframes`
-  0%   { box-shadow: 0 0 0 0   rgba(94,242,192,0.45); }
-  70%  { box-shadow: 0 0 0 8px rgba(94,242,192,0);    }
-  100% { box-shadow: 0 0 0 0   rgba(94,242,192,0);    }
-`;
-
-const ICON_BACKGROUNDS: Record<Device['type'], string> = {
-  upnp: 'linear-gradient(160deg, #6FD3FF, #2E6BE6)',
-  chromecast: 'linear-gradient(160deg, #FF8A5B, #E5487A)',
-};
+const TYPE_LABELS: Record<Device['type'], string> = { upnp: 'TV', chromecast: 'Chromecast' };
 
 export function Connector({ label, connection, onSelect }: Props): React.JSX.Element {
   const [devices, setDevices] = useState<Device[]>([]);
@@ -52,33 +35,25 @@ export function Connector({ label, connection, onSelect }: Props): React.JSX.Ele
   const busy = connection?.state === 'CONNECTING';
 
   return (
-    <Stack spacing={1.25} sx={{ minWidth: 0 }}>
-      <Stack direction="row" spacing={1} sx={{ alignItems: 'center', height: 30 }}>
-        <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>{label}</Typography>
-        <Box
-          sx={{
-            width: 6,
-            height: 6,
-            borderRadius: '50%',
-            bgcolor: 'primary.main',
-            animation: `${pulse} 2s infinite ease-out`,
-          }}
-        />
-        <Box sx={{ flex: 1 }} />
+    <Stack spacing={1} sx={{ minWidth: 0 }}>
+      <Stack direction="row" sx={{ alignItems: 'center', height: 30, pl: 0.5 }}>
+        <Typography sx={{ fontSize: 13, fontWeight: 500, color: 'text.secondary', flex: 1 }}>
+          {label}
+        </Typography>
         <Button
           size="small"
           onClick={refresh}
           disabled={scanning}
-          sx={{ color: 'text.secondary', fontWeight: 500 }}
+          sx={{ color: 'primary.main', fontWeight: 600 }}
         >
           {scanning ? 'Looking…' : 'Look again'}
         </Button>
       </Stack>
 
-      <Stack direction="row" spacing={1.25} sx={{ overflowX: 'auto', pb: 0.5 }}>
+      <Stack direction="row" spacing={1} sx={{ overflowX: 'auto', pb: 0.5 }}>
         {shown.map((d) => {
           const selected = picked?.id === d.id;
-          const connecting = selected && connection?.state === 'CONNECTING';
+          const state = selected ? connection?.state : undefined;
           const Icon = d.type === 'chromecast' ? Cast : Tv;
           return (
             <ButtonBase
@@ -88,67 +63,40 @@ export function Connector({ label, connection, onSelect }: Props): React.JSX.Ele
               aria-pressed={selected}
               title={d.ip ? `${d.name} · ${d.ip}` : d.name}
               sx={{
-                flex: '0 0 196px',
-                height: 68,
+                flex: '0 0 184px',
+                height: 64,
                 px: 1.75,
                 gap: 1.5,
                 justifyContent: 'flex-start',
                 textAlign: 'left',
                 borderRadius: '16px',
-                position: 'relative',
-                border: '2px solid',
-                borderColor: selected ? 'primary.main' : 'transparent',
-                bgcolor: selected ? 'rgba(94,242,192,0.12)' : 'rgba(255,255,255,0.07)',
-                transition: 'background-color 150ms ease, border-color 150ms ease',
+                bgcolor: selected ? 'tonal.primaryContainer' : 'tonal.surfaceContainerHigh',
+                color: selected ? 'tonal.onPrimaryContainer' : 'tonal.onSurface',
+                transition: 'background-color 150ms ease',
                 '&:hover': {
-                  bgcolor: selected ? 'rgba(94,242,192,0.16)' : 'rgba(255,255,255,0.12)',
+                  bgcolor: (theme) =>
+                    selected
+                      ? alpha(theme.palette.tonal.primaryContainer, 0.85)
+                      : theme.palette.tonal.surfaceContainerHighest,
                 },
-                '&.Mui-disabled': { opacity: 0.5 },
+                '&.Mui-disabled': { opacity: 0.38 },
               }}
             >
-              <Box
-                sx={{
-                  width: 40,
-                  height: 40,
-                  borderRadius: '12px',
-                  display: 'grid',
-                  placeItems: 'center',
-                  flexShrink: 0,
-                  background: ICON_BACKGROUNDS[d.type],
-                }}
-              >
-                {connecting ? (
-                  <CircularProgress size={18} sx={{ color: 'white' }} />
-                ) : (
-                  <Icon sx={{ fontSize: 20 }} />
-                )}
-              </Box>
+              {state === 'CONNECTING' ? (
+                <CircularProgress size={22} color="inherit" />
+              ) : (
+                <Icon sx={{ fontSize: 24, color: selected ? 'inherit' : 'primary.main' }} />
+              )}
               <Stack sx={{ minWidth: 0 }}>
-                <Typography noWrap sx={{ fontWeight: 600, fontSize: 15 }}>
+                <Typography noWrap sx={{ fontWeight: 600, fontSize: 14 }}>
                   {d.name}
                 </Typography>
-                <Typography noWrap sx={{ fontSize: 12, color: 'text.secondary' }}>
-                  {d.type === 'chromecast' ? 'Chromecast' : 'TV'}
+                <Typography noWrap sx={{ fontSize: 12, opacity: selected ? 0.8 : 0.7 }}>
+                  {TYPE_LABELS[d.type]}
+                  {state === 'CONNECTED' && ' · connected'}
+                  {state === 'CONNECTING' && ' · connecting…'}
                 </Typography>
               </Stack>
-              {selected && !connecting && (
-                <Box
-                  sx={{
-                    position: 'absolute',
-                    top: 8,
-                    right: 8,
-                    width: 20,
-                    height: 20,
-                    borderRadius: '50%',
-                    bgcolor: 'primary.main',
-                    color: 'primary.contrastText',
-                    display: 'grid',
-                    placeItems: 'center',
-                  }}
-                >
-                  <CheckRounded sx={{ fontSize: 14 }} />
-                </Box>
-              )}
             </ButtonBase>
           );
         })}
@@ -159,15 +107,17 @@ export function Connector({ label, connection, onSelect }: Props): React.JSX.Ele
             spacing={1.5}
             sx={{
               flex: '0 0 auto',
-              height: 68,
+              height: 64,
               px: 2.5,
               alignItems: 'center',
               borderRadius: '16px',
-              border: '2px dashed rgba(255,255,255,0.12)',
+              border: '1px dashed',
+              borderColor: 'tonal.outlineVariant',
+              color: 'text.secondary',
             }}
           >
             <CircularProgress size={18} />
-            <Typography sx={{ fontSize: 14, color: 'text.secondary' }}>
+            <Typography sx={{ fontSize: 14 }}>
               Looking for TVs and Chromecasts on your network…
             </Typography>
           </Stack>

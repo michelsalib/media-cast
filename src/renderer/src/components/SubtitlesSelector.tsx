@@ -1,10 +1,11 @@
+import { CheckRounded } from '@mui/icons-material';
 import { Button, Stack, Tooltip } from '@mui/material';
 import { useEffect, useState } from 'react';
 import { isBitmapSubtitleCodec } from '../../../shared/subtitles';
 import type { DeviceType } from '../../../shared/types';
 import { api, pathFor } from '../ipc';
 import { languageName } from '../labels';
-import { pillSx } from '../theme';
+import { chipSx } from '../theme';
 import { NO_SUBTITLES, type SubtitlesFile, type SubtitlesSelection } from './SubtitlesSelection';
 
 type Props = {
@@ -128,7 +129,8 @@ export default function SubtitlesSelector({
                 aria-pressed={selected}
                 disabled={!supported}
                 onClick={() => setChoice(c)}
-                sx={pillSx(selected)}
+                sx={chipSx(selected)}
+                startIcon={selected ? <CheckRounded /> : undefined}
               >
                 {choiceLabel(c)}
               </Button>
