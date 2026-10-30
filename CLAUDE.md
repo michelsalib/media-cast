@@ -48,17 +48,19 @@ Two scanners merge into one `knownDevices` map in `index.ts`:
 
 ### [MediaServer](src/main/MediaServer.ts)
 
-Each session uses a fresh UUID URL prefix so old TVs don't cache prior content. Two modes per session:
+Each `load` calls `startSession()` for a fresh UUID URL prefix — a reused URI makes TVs (LG) reuse the previous file's cached state. It rotates right before serving, after probe/extract, so the TV can keep reading the old file until then. Two modes per session:
 
-- Direct (Chromecast) — `send` package, byte-range capable.
-- Transcoded (UPnP) — pipes `ffmpeg` MPEG-TS output. `BurnSubtitles` option burns subs into the video stream (most DLNA TVs don't honor sidecar subs).
+- Direct (Chromecast, and UPnP when `checkCompat` allows) — `send` package, byte-range capable.
+- Transcoded (UPnP) — pipes `ffmpeg` MPEG-TS output. `BurnSubtitles` option burns subs into the video stream (most DLNA TVs don't honor sidecar subs). One encoder at a time: a new GET kills the previous one. Output capped at 1080p.
+
+DLNA `protocolInfo` / `contentFeatures.dlna.org` values live in [upnp/dlna.ts](src/main/upnp/dlna.ts) — DIDL and HTTP headers must agree. Never set FLAGS bits 31/27/26 (live-stream semantics).
 
 [pickLocalIpFor](src/main/network.ts) selects the LAN interface on the target's subnet — required for correct URLs on multi-homed hosts (VPN, WSL, virtual adapters).
 
 ### Subtitles ([subtitleExtractor.ts](src/main/subtitleExtractor.ts))
 
 - ffmpeg has no SMI muxer → request SRT then convert in JS (`srtToSmi`).
-- Old DLNA TVs (Samsung) reject UTF-8 SRT → re-encode Latin-1.
+- Text subtitles that aren't valid UTF-8 are treated as Windows-1252: decoded in JS for SMI/VTT, `-sub_charenc`/`charenc=CP1252` for ffmpeg. Everything is served as UTF-8.
 - Internal tracks by stream index, external by path.
 
 `load` handler branching: UPnP → burn-in; Chromecast → sidecar WebVTT.
@@ -70,7 +72,7 @@ State is flat — `useState` only, ownership by component:
 - [App.tsx](src/renderer/src/App.tsx) — `connectedDevice`; toggles `<Connector>` vs `<Player>`. Theme defined inline here.
 - [Connector.tsx](src/renderer/src/components/Connector.tsx) — subscribes `onEvent('scan')` and triggers an initial `refresh` on mount; owns `DISCONNECTED → LOADING → CONNECTED`.
 - [Player.tsx](src/renderer/src/components/Player.tsx) — subscribes `onEvent('status')`. The 1s ticker that drives between player-side status events lives in [PlaybackController](src/main/PlaybackController.ts), not the renderer.
-- [Dropper.tsx](src/renderer/src/components/Dropper.tsx) — drag-and-drop ingestion. Discriminator is filename suffix: `.mp4`/`.mkv` → video, anything else → subs. Thumbnail regenerated per video via `api.thumbnail`.
+- [Dropper.tsx](src/renderer/src/components/Dropper.tsx) — drag-and-drop ingestion. Discriminator is filename suffix: `.mp4`/`.mkv`/`.avi` → video, `.srt`/`.vtt`/`.ass`/`.ssa` → subs, anything else is rejected with a message. AVI is UPnP-only (direct play if the Sink lists it, else transcode); a Chromecast load of an AVI throws. Thumbnail regenerated per video via `api.thumbnail`.
 
 [SubtitlesSelection.ts](src/renderer/src/components/SubtitlesSelection.ts) is a 3-arm union (`internal` / `external` / `no subtitles`); [SubtitlesSelector.tsx](src/renderer/src/components/SubtitlesSelector.tsx) builds choices from `api.probe` + the optional sidecar, auto-selects `external > internal > none`. Dropper maps it to the `load` call's `subtitlesPathOrIndex` (string | number | undefined) — that's what main keys on for burn-in vs sidecar.
 

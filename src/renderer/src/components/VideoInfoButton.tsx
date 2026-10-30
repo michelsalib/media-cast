@@ -114,7 +114,7 @@ export default function VideoInfoButton({ video, sx }: Props): React.JSX.Element
                       <Row
                         key={s.index}
                         label={s.codec_name.toUpperCase()}
-                        value={formatLangTitle(s.tags.language, s.tags.title)}
+                        value={formatLangTitle(s.tags?.language, s.tags?.title)}
                       />
                     ))}
                   </Section>
@@ -129,7 +129,7 @@ export default function VideoInfoButton({ video, sx }: Props): React.JSX.Element
                       <Row
                         key={s.index}
                         label={s.codec_name.toUpperCase()}
-                        value={formatLangTitle(s.tags.language, s.tags.title)}
+                        value={formatLangTitle(s.tags?.language, s.tags?.title)}
                       />
                     ))}
                   </Section>

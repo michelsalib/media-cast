@@ -37,6 +37,7 @@ const pulse = (color: string) => keyframes`
 export default function Player({ device, onDisconnect }: Props): React.JSX.Element {
   const [status, setStatus] = useState<PlayerStatus | undefined>(undefined);
   const [marqueeDistance, setMarqueeDistance] = useState(0);
+  const [dragValue, setDragValue] = useState<number | undefined>();
   const theme = useTheme();
   const headerRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLSpanElement>(null);
@@ -59,7 +60,11 @@ export default function Player({ device, onDisconnect }: Props): React.JSX.Eleme
     setMarqueeDistance(0);
   }
 
-  function seek(_evt: Event, value: number): void {
+  // Seek once on release. onChange fires continuously while dragging: every Seek makes a
+  // UPnP TV re-request the stream, which restarts the transcoder each time. Meanwhile the
+  // thumb follows the drag instead of snapping back to each 1 s status tick.
+  function seek(_evt: unknown, value: number): void {
+    setDragValue(undefined);
     void api.seek(value);
   }
 
@@ -218,8 +223,9 @@ export default function Player({ device, onDisconnect }: Props): React.JSX.Eleme
         <Slider
           min={0}
           max={status?.duration || 100}
-          value={status?.currentTime || 0}
-          onChange={seek}
+          value={dragValue ?? (status?.currentTime || 0)}
+          onChange={(_evt, value) => setDragValue(value)}
+          onChangeCommitted={seek}
         />
         <Stack direction="row" sx={{ width: '100%', justifyContent: 'space-between' }}>
           <div>{status?.currentTime ? format(status.currentTime * 1000) : 'NA'}</div>

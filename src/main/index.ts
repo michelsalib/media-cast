@@ -119,6 +119,12 @@ app.whenReady().then(() => {
       type: d.type,
       name: d.name,
       ip: d.ip,
+      ...(d.type === 'upnp'
+        ? {
+            acceptedVideoMimes: d.acceptedVideoMimes,
+            acceptedWildcardVideoMimes: d.acceptedWildcardVideoMimes,
+          }
+        : {}),
     }));
     sendEvent(mainWindow, 'scan', devices);
   }
@@ -139,15 +145,38 @@ app.whenReady().then(() => {
 
   registerMainApi(createMainApi({ controller, scanners, updater: autoUpdater }));
 
-  mainWindow.on('closed', async () => {
-    await controller.close();
-    for (const s of scanners) s.close();
-    await server.close();
+  // Stop + UNSUBSCRIBE must reach the renderer, or the TV is left on a dead URL and
+  // keeps NOTIFYing a closed port until the subscription expires. Run once, and hold
+  // the quit until it's done — bounded, as server.close() waits on open TV sockets.
+  let shutdown: Promise<void> | undefined;
+  const shutDown = (): Promise<void> => {
+    shutdown ??= Promise.race([
+      (async () => {
+        await controller.close().catch((err) => console.error('controller close failed:', err));
+        for (const s of scanners) s.close();
+        server.closeAllConnections();
+        await server.close();
+      })(),
+      new Promise<void>((resolve) => setTimeout(resolve, 3000)),
+    ]);
+    return shutdown;
+  };
+
+  mainWindow.on('closed', () => void shutDown());
+
+  let readyToQuit = false;
+  app.on('before-quit', (event) => {
+    if (readyToQuit) return;
+    event.preventDefault();
+    void shutDown().finally(() => {
+      readyToQuit = true;
+      app.quit();
+    });
   });
 });
 
+// Quit on every platform, macOS included: closing the window shuts the playback, scanning
+// and media services down for good, so a window reopened from the dock would be inert.
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
+  app.quit();
 });

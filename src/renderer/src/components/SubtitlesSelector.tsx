@@ -52,7 +52,7 @@ export default function SubtitlesSelector({
             (s, i): SubtitlesSelection => ({
               type: 'internal',
               index: i,
-              name: s.tags.title || s.tags.language || 'Unknown video subtitles',
+              name: s.tags?.title || s.tags?.language || 'Unknown video subtitles',
               bitmap: isBitmapSubtitleCodec(s.codec_name),
             })
           );

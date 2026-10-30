@@ -28,7 +28,7 @@ export default function AudioSelector({ videoFile, onChange }: Props): React.JSX
         .map(
           (s, i): AudioSelection => ({
             index: i,
-            name: formatLangTitle(s.tags.language, s.tags.title) ?? `Track ${i + 1}`,
+            name: formatLangTitle(s.tags?.language, s.tags?.title) ?? `Track ${i + 1}`,
           })
         );
 

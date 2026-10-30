@@ -5,10 +5,18 @@ import type { DeviceType } from './types';
 // H.264 + AAC/AC3/MP3 is universal. These lists only apply when the renderer's
 // Sink entry for the chosen container is profile-locked (e.g. `DLNA.ORG_PN=AVC_*`).
 // When the Sink advertises the MIME with a `*` wildcard in the additional-info
-// field, the renderer is signalling "any codec inside this container" and we
-// bypass these gates entirely — see [[checkCompat]] and [[fetchProtocolInfo]].
+// field, the renderer is signalling "any codec inside this container" and only the
+// WILDCARD_UNSUPPORTED_* deny-lists apply — see [[checkCompat]] and [[fetchProtocolInfo]].
 export const DIRECT_PLAY_VIDEO_CODECS = new Set(['h264']);
 export const DIRECT_PLAY_AUDIO_CODECS = new Set(['aac', 'ac3', 'eac3', 'mp3', 'mp2']);
+
+// A `*` wildcard means the renderer accepts the container, not that it decodes every
+// codec inside. These are still refused under a wildcard: DTS and TrueHD were dropped
+// by most 2016–2019 TVs (LG included), AV1 only arrived around 2020, and consumer
+// H.264 decoders are 8-bit 4:2:0 only (no Hi10P / 4:2:2 / 4:4:4).
+export const WILDCARD_UNSUPPORTED_VIDEO_CODECS = new Set(['av1']);
+export const WILDCARD_UNSUPPORTED_AUDIO_CODECS = new Set(['dts', 'truehd', 'mlp']);
+const H264_DIRECT_PLAY_PIX_FMTS = new Set(['yuv420p', 'yuvj420p']);
 
 // For each source container we know about, the candidate MIME types we'd be willing
 // to advertise in the DIDL res `protocolInfo`. The first one the renderer also
@@ -17,6 +25,7 @@ export const DIRECT_PLAY_AUDIO_CODECS = new Set(['aac', 'ac3', 'eac3', 'mp3', 'm
 export const CONTAINER_MIMES: Record<string, readonly string[]> = {
   '.mp4': ['video/mp4'],
   '.mkv': ['video/x-matroska'],
+  '.avi': ['video/x-msvideo', 'video/avi'],
 };
 
 // Last-resort fallback when the renderer didn't return a usable Sink. Direct play
@@ -54,10 +63,10 @@ export interface CompatInput {
   audioIndex: number | undefined;
   // MIMEs the renderer advertised in its ConnectionManager Sink. Empty/undefined
   // means we never got a usable answer — fall back to the static container list.
-  acceptedVideoMimes?: ReadonlySet<string>;
+  acceptedVideoMimes?: readonly string[];
   // Subset of acceptedVideoMimes whose Sink entry had a `*` codec wildcard. When
   // the chosen MIME is in this set, the codec allow-list is bypassed.
-  acceptedWildcardVideoMimes?: ReadonlySet<string>;
+  acceptedWildcardVideoMimes?: readonly string[];
 }
 
 export function checkCompat(input: CompatInput): CompatReport {
@@ -72,7 +81,8 @@ export function checkCompat(input: CompatInput): CompatReport {
   } = input;
   const container = extractExt(videoFileName);
   const video = probeData.streams.find((s) => s.codec_type === 'video');
-  const audio = probeData.streams.find((s) => s.codec_type === 'audio');
+  // The track that will actually play, not just the first one.
+  const audio = probeData.streams.filter((s) => s.codec_type === 'audio')[audioIndex ?? 0];
   const videoCodec = video?.codec_name;
   const audioCodec = audio?.codec_name;
 
@@ -101,18 +111,32 @@ export function checkCompat(input: CompatInput): CompatReport {
   if (!videoMimeType) {
     issues.push({
       kind: 'container',
-      detail: acceptedVideoMimes?.size
+      detail: acceptedVideoMimes?.length
         ? `Container ${container || 'unknown'} not advertised by renderer`
         : `Container ${container || 'unknown'} not supported for direct play`,
     });
   }
 
-  // If the renderer advertised the chosen MIME with a codec wildcard, trust it
-  // and skip the codec allow-list.
+  // If the renderer advertised the chosen MIME with a codec wildcard, swap the
+  // codec allow-list for the much shorter WILDCARD_UNSUPPORTED_* deny-list.
   const codecWildcard =
-    videoMimeType !== undefined && (acceptedWildcardVideoMimes?.has(videoMimeType) ?? false);
+    videoMimeType !== undefined && (acceptedWildcardVideoMimes?.includes(videoMimeType) ?? false);
 
-  if (!codecWildcard) {
+  if (codecWildcard) {
+    if (videoCodec && WILDCARD_UNSUPPORTED_VIDEO_CODECS.has(videoCodec)) {
+      issues.push({
+        kind: 'videoCodec',
+        detail: `Video codec ${videoCodec} is rarely decoded by DLNA TVs`,
+      });
+    }
+
+    if (audioCodec && WILDCARD_UNSUPPORTED_AUDIO_CODECS.has(audioCodec)) {
+      issues.push({
+        kind: 'audioCodec',
+        detail: `Audio codec ${audioCodec} is not decoded by most DLNA TVs`,
+      });
+    }
+  } else {
     if (!videoCodec || !DIRECT_PLAY_VIDEO_CODECS.has(videoCodec)) {
       issues.push({
         kind: 'videoCodec',
@@ -128,6 +152,14 @@ export function checkCompat(input: CompatInput): CompatReport {
     }
   }
 
+  // Whatever the Sink says, H.264 decoders in TVs are 8-bit 4:2:0 (no Hi10P, 4:2:2, 4:4:4).
+  if (videoCodec === 'h264' && video?.pix_fmt && !H264_DIRECT_PLAY_PIX_FMTS.has(video.pix_fmt)) {
+    issues.push({
+      kind: 'videoCodec',
+      detail: `H.264 ${video.profile ?? ''} ${video.pix_fmt} (TV decoders are 8-bit 4:2:0 only)`,
+    });
+  }
+
   return {
     needsTranscoding: issues.length > 0,
     container,
@@ -141,13 +173,13 @@ export function checkCompat(input: CompatInput): CompatReport {
 function pickVideoMime(
   container: string,
   candidates: readonly string[],
-  acceptedVideoMimes: ReadonlySet<string> | undefined
+  acceptedVideoMimes: readonly string[] | undefined
 ): string | undefined {
   if (candidates.length === 0) {
     return undefined;
   }
-  if (acceptedVideoMimes && acceptedVideoMimes.size > 0) {
-    return candidates.find((m) => acceptedVideoMimes.has(m));
+  if (acceptedVideoMimes && acceptedVideoMimes.length > 0) {
+    return candidates.find((m) => acceptedVideoMimes.includes(m));
   }
   // No Sink info — fall back to the conservative static container list.
   return DIRECT_PLAY_CONTAINERS_FALLBACK.has(container) ? candidates[0] : undefined;

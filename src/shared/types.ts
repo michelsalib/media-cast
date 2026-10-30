@@ -15,6 +15,11 @@ export interface Device {
   type: DeviceType;
   name: string;
   ip?: string;
+  // UPnP only: video MIME types the renderer claims to accept in its ConnectionManager
+  // Sink, and the subset advertised with a codec wildcard (`*`). Arrays, not Sets, so
+  // they survive IPC — the renderer feeds them to [[checkCompat]] exactly as main does.
+  acceptedVideoMimes?: readonly string[];
+  acceptedWildcardVideoMimes?: readonly string[];
 }
 
 export interface DevicesScanner<D extends Device = Device> {
@@ -39,6 +44,8 @@ export interface LoadVideoOptions {
   subtitlesUrl?: string;
   subtitlesFormat?: 'vtt' | 'srt' | 'smi';
   duration?: number;
+  // File size in bytes, for direct play.
+  size?: number;
 }
 
 export interface Renderer {

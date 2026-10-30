@@ -32,3 +32,11 @@ function ipToInt(ip: string): number | undefined {
   }
   return ((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0;
 }
+
+export function localIPv4Addresses(): string[] {
+  return Object.values(networkInterfaces())
+    .flat()
+    .filter((i) => i?.family === 'IPv4' && !i.internal)
+    .map((i) => i?.address)
+    .filter((a): a is string => !!a);
+}

@@ -1,5 +1,5 @@
 import dgram from 'node:dgram';
-import { networkInterfaces } from 'node:os';
+import { localIPv4Addresses } from '../network';
 
 const SSDP_HOST = '239.255.255.250';
 const SSDP_PORT = 1900;
@@ -52,7 +52,7 @@ export class SsdpScanner {
     const current = new Set(localIPv4Addresses());
     for (const [addr, bound] of this.sockets) {
       if (!current.has(addr)) {
-        bound.socket.close();
+        closeQuietly(bound.socket);
         this.sockets.delete(addr);
       }
     }
@@ -63,7 +63,13 @@ export class SsdpScanner {
       const socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
       const bound: BoundSocket = { socket, ready: false };
       socket.on('message', (msg) => this.handleMessage(msg));
-      socket.on('error', () => {});
+      socket.on('error', () => {
+        // A failed bind leaves a dead socket; drop it so the next search retries the
+        // address, and so close() doesn't throw ERR_SOCKET_DGRAM_NOT_RUNNING on it.
+        if (!bound.ready && this.sockets.get(addr) === bound) {
+          this.sockets.delete(addr);
+        }
+      });
       socket.bind(0, addr, () => {
         try {
           socket.setMulticastInterface(addr);
@@ -115,16 +121,14 @@ export class SsdpScanner {
   close(): void {
     this.started = false;
     for (const bound of this.sockets.values()) {
-      bound.socket.close();
+      closeQuietly(bound.socket);
     }
     this.sockets.clear();
   }
 }
 
-function localIPv4Addresses(): string[] {
-  return Object.values(networkInterfaces())
-    .flat()
-    .filter((i) => i?.family === 'IPv4' && !i.internal)
-    .map((i) => i?.address)
-    .filter((a): a is string => !!a);
+function closeQuietly(socket: dgram.Socket): void {
+  try {
+    socket.close();
+  } catch {}
 }

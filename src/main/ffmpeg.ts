@@ -18,7 +18,12 @@ export function getBinaryPaths(): { ffmpegPath: string; ffprobePath: string } {
 }
 
 async function runFfmpeg(args: string[]): Promise<Buffer> {
-  const { stdout } = await promisify(execFile)(ffmpegPath, args, { encoding: 'buffer' });
+  // execFile kills the child past maxBuffer (default 1 MiB) — too small for a long
+  // subtitle track or a styled .ass.
+  const { stdout } = await promisify(execFile)(ffmpegPath, args, {
+    encoding: 'buffer',
+    maxBuffer: 64 * 1024 * 1024,
+  });
   return stdout;
 }
 
@@ -28,10 +33,14 @@ export interface FFProbeData {
     codec_name: string;
     codec_long_name: string;
     codec_type: 'subtitle' | 'audio' | 'video';
+    profile?: string;
+    pix_fmt?: string;
     width?: number;
     height?: number;
     color_transfer?: string;
-    tags: {
+    avg_frame_rate?: string;
+    // ffprobe omits `tags` entirely on untagged streams.
+    tags?: {
       language?: string;
       title?: string;
     };
@@ -50,7 +59,12 @@ export interface FFProbeData {
 export type SubtitleFormat = 'vtt' | 'srt' | 'smi';
 
 export type SubtitleSource =
-  | { source: 'external'; path: string }
+  | {
+      source: 'external';
+      path: string;
+      // ffmpeg -sub_charenc / libass charenc for text files that aren't UTF-8.
+      charenc?: string;
+    }
   | {
       source: 'internal';
       videoPath: string;
@@ -69,7 +83,11 @@ export function isHdrTransfer(colorTransfer: string | undefined): boolean {
 
 export function extractSubtitles(source: SubtitleSource, format: 'srt' | 'vtt'): Promise<Buffer> {
   const inputPath = source.source === 'internal' ? source.videoPath : source.path;
-  const args = ['-i', inputPath];
+  const args: string[] = [];
+  if (source.source === 'external' && source.charenc) {
+    args.push('-sub_charenc', source.charenc);
+  }
+  args.push('-i', inputPath);
   if (source.source === 'internal') {
     args.push('-map', `0:s:${source.trackIndex}`);
   }
@@ -130,20 +148,38 @@ export async function probeSubtitleCanvas(
   }
 }
 
-export function thumbnail(videoPath: string, width = 800, height = 600): Promise<Buffer> {
-  return runFfmpeg([
+// JPEG, aspect preserved. -ss before -i seeks the input to a keyframe instead of
+// decoding the first minute; a video shorter than that yields no frame, so retry at 0.
+export async function thumbnail(videoPath: string, width = 800): Promise<Buffer> {
+  const frame = await runFfmpeg(thumbnailArgs(videoPath, 60, width));
+  return frame.length > 0 ? frame : runFfmpeg(thumbnailArgs(videoPath, 0, width));
+}
+
+function thumbnailArgs(videoPath: string, atSeconds: number, width: number): string[] {
+  return [
+    '-ss',
+    String(atSeconds),
     '-i',
     videoPath,
-    '-ss',
-    '00:01:00',
     '-frames:v',
     '1',
+    '-vf',
+    `scale=${width}:-2,format=yuvj420p`,
+    '-c:v',
+    'mjpeg',
+    '-q:v',
+    '4',
     '-f',
     'image2',
-    '-s',
-    `${width}x${height}`,
     'pipe:1',
-  ]);
+  ];
+}
+
+// ffprobe's avg_frame_rate is a fraction ("24000/1001"); "0/0" when unknown.
+export function parseFrameRate(rate: string | undefined): number | undefined {
+  const [num, den] = (rate ?? '').split('/').map(Number);
+  const fps = den ? num / den : num;
+  return Number.isFinite(fps) && fps > 0 ? fps : undefined;
 }
 
 export interface VideoSize {
@@ -156,9 +192,15 @@ export interface TranscodeOptions {
   seekSeconds?: number;
   burnSubtitles?: SubtitleSource;
   videoSize?: VideoSize;
+  frameRate?: number;
   audioTrackIndex?: number;
   hdr?: boolean;
 }
+
+// Never encode above 1080p. A 4K H.264 stream is outside what High@4.x TV decoders
+// accept, and libx264 at 4K (or with the float tone map) runs slower than real time on
+// most PCs — the TV's buffer drains and webOS gives up on the stream.
+const MAX_OUTPUT: VideoSize = { width: 1920, height: 1080 };
 
 export interface TranscodeHandle {
   stream: Readable;
@@ -167,7 +209,7 @@ export interface TranscodeHandle {
 
 /**
  * Transcodes any video to H.264 + AAC in an MPEG-TS stream piped on stdout.
- * Tuned for old DLNA TV decoders: High@4.0, no sliced threading, closed pix_fmt.
+ * Tuned for old DLNA TV decoders: ≤1080p, High@4.0/4.2, VBV-capped, 8-bit 4:2:0.
  * Returns a Readable for the caller to pipe somewhere, plus a kill function.
  */
 export async function transcodeToMpegTs(options: TranscodeOptions): Promise<TranscodeHandle> {
@@ -176,9 +218,12 @@ export async function transcodeToMpegTs(options: TranscodeOptions): Promise<Tran
     seekSeconds = 0,
     burnSubtitles,
     videoSize,
+    frameRate,
     audioTrackIndex = 0,
     hdr = false,
   } = options;
+  const downscaled =
+    !!videoSize && (videoSize.width > MAX_OUTPUT.width || videoSize.height > MAX_OUTPUT.height);
 
   const args: string[] = [];
   if (seekSeconds > 0) {
@@ -191,19 +236,26 @@ export async function transcodeToMpegTs(options: TranscodeOptions): Promise<Tran
   // Crop to multiples of 16 (the H.264 macroblock size) so the stream needs no
   // cropping rectangle — one less thing for weak TV decoders to get wrong. Subtitles
   // are placed after the crop so libass scales against the actual rendered height.
+  // Downscale first so the tone map works on at most 1080p.
   const videoFilters: string[] = [];
+  if (downscaled) {
+    videoFilters.push(
+      `scale=${MAX_OUTPUT.width}:${MAX_OUTPUT.height}:force_original_aspect_ratio=decrease:force_divisible_by=2`
+    );
+  }
   if (hdr) {
     videoFilters.push(HDR_TONEMAP_FILTER);
   }
   videoFilters.push('crop=trunc(iw/16)*16:trunc(ih/16)*16');
-  const croppedSize = videoSize ? alignTo16(videoSize) : undefined;
+  const croppedSize = videoSize ? alignTo16(fitWithin(videoSize, MAX_OUTPUT)) : undefined;
 
   if (burnSubtitles?.source === 'internal' && burnSubtitles.bitmap) {
     const graph = buildBitmapOverlayGraph(
       videoFilters,
       burnSubtitles.trackIndex,
       burnSubtitles.bitmap.canvas,
-      croppedSize
+      croppedSize,
+      videoSize ? fitRatio(videoSize, MAX_OUTPUT) : 1
     );
     args.push('-filter_complex', graph, '-map', '[out]');
   } else {
@@ -218,16 +270,27 @@ export async function transcodeToMpegTs(options: TranscodeOptions): Promise<Tran
     `0:a:${audioTrackIndex}?`,
     '-c:v',
     'libx264',
+    // Downscaling and tone mapping eat into the real-time budget; trade a little
+    // compression efficiency for speed there.
     '-preset',
-    'veryfast',
+    downscaled || hdr ? 'superfast' : 'veryfast',
     '-profile:v',
     'high',
+    // 4.0 covers 1080p30; 1080p50/60 needs 4.2. x264 only writes the label, so it has
+    // to match what the stream really is or strict decoders reject it.
     '-level',
-    '4.0',
+    frameRate && frameRate > 30 ? '4.2' : '4.0',
     '-pix_fmt',
     'yuv420p',
     '-g',
     '60',
+    // -level alone only labels the stream; without VBV, x264's CRF bitrate is unbounded
+    // and grainy scenes overshoot what the TV's buffer (and Wi-Fi) sustain. Cap well
+    // under High@4.0's 25 Mb/s.
+    '-maxrate',
+    '12M',
+    '-bufsize',
+    '24M',
     // Disable sliced threading: per-slice corruption on weak decoders shows as a band of
     // garbage (~1/4 of the screen). Frame-level threading still works.
     '-x264-params',
@@ -269,6 +332,12 @@ export async function transcodeToMpegTs(options: TranscodeOptions): Promise<Tran
   if (!ffmpeg.stdout) {
     throw new Error('ffmpeg stdout is not piped');
   }
+  // Surface a missing/unrunnable binary to the caller (→ HTTP 500) instead of
+  // answering 200 with an empty body.
+  await new Promise<void>((resolve, reject) => {
+    ffmpeg.once('spawn', resolve);
+    ffmpeg.once('error', reject);
+  });
 
   return {
     stream: ffmpeg.stdout,
@@ -293,6 +362,22 @@ const HDR_TONEMAP_FILTER = [
   'format=yuv420p',
 ].join(',');
 
+// Mirrors the scale filter's force_original_aspect_ratio=decrease:force_divisible_by=2.
+function fitRatio(size: VideoSize, max: VideoSize): number {
+  return Math.min(1, max.width / size.width, max.height / size.height);
+}
+
+function fitWithin(size: VideoSize, max: VideoSize): VideoSize {
+  const ratio = fitRatio(size, max);
+  if (ratio === 1) {
+    return size;
+  }
+  return {
+    width: Math.floor((size.width * ratio) / 2) * 2,
+    height: Math.floor((size.height * ratio) / 2) * 2,
+  };
+}
+
 function alignTo16(size: VideoSize): VideoSize {
   return {
     width: Math.floor(size.width / 16) * 16,
@@ -304,17 +389,28 @@ function buildBitmapOverlayGraph(
   videoFilters: string[],
   trackIndex: number,
   rawCanvas: VideoSize | undefined,
-  videoSize: VideoSize | undefined
+  videoSize: VideoSize | undefined,
+  // Factor the video was downscaled by; the canvas must shrink with it or padding to
+  // it would bring the frame back above 1080p.
+  downscale: number
 ): string {
   const video = [...videoFilters];
   const subs = ['null'];
   // Same multiple-of-16 constraint as the video crop; the centered overlay below
   // trims the few canvas rows that don't fit.
-  const canvas = rawCanvas ? alignTo16(rawCanvas) : undefined;
+  const canvas = rawCanvas
+    ? alignTo16({
+        width: Math.round(rawCanvas.width * downscale),
+        height: Math.round(rawCanvas.height * downscale),
+      })
+    : undefined;
   if (canvas && videoSize && canvas.width >= videoSize.width && canvas.height >= videoSize.height) {
     // The encode was cropped from the original frame (letterbox bars removed): put the
     // bars back so cues positioned inside them stay on screen.
     video.push(`pad=${canvas.width}:${canvas.height}:(ow-iw)/2:(oh-ih)/2`);
+    if (downscale < 1) {
+      subs.push(`scale=${canvas.width}:${canvas.height}`);
+    }
   } else if (videoSize) {
     subs.push(`scale=${videoSize.width}:${videoSize.height}`);
   }
@@ -333,6 +429,9 @@ export function buildSubtitlesFilter(
   const parts = [`filename=${escapeFilterPath(path)}`];
   if (spec.source === 'internal') {
     parts.push(`si=${spec.trackIndex}`);
+  }
+  if (spec.source === 'external' && spec.charenc) {
+    parts.push(`charenc=${spec.charenc}`);
   }
   if (videoSize) {
     parts.push(`original_size=${videoSize.width}x${videoSize.height}`);

@@ -116,7 +116,8 @@ export class UpnpEventing {
           hostname: u.hostname,
           port: u.port || 80,
           path: u.pathname + (u.search ?? ''),
-          headers,
+          // Same as soapCall: no keep-alive with renderers.
+          headers: { ...headers, Connection: 'close' },
         },
         (res) => {
           res.resume();

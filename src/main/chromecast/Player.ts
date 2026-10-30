@@ -8,7 +8,14 @@ export class CastPlayer implements Renderer {
   private statusCallback?: (status: PlayerStatus) => void;
   private lastMedia?: Media;
 
-  constructor(private readonly host: string) {}
+  constructor(private readonly host: string) {
+    // castv2-client re-emits socket errors and the heartbeat 'Device timeout' as 'error'
+    // on the client; with no listener that's an uncaught exception in main.
+    this.client.on('error', (err) => {
+      console.error('[cast] client error:', err.message);
+      this.dropPlayer();
+    });
+  }
 
   onStatus(callback: (status: PlayerStatus) => void): void {
     this.statusCallback = callback;
@@ -16,13 +23,36 @@ export class CastPlayer implements Renderer {
 
   async connect(): Promise<void> {
     await promisify(this.client.connect).bind(this.client)(this.host);
-    this.player = await promisify(this.client.launch).bind(this.client)(DefaultMediaReceiver);
-    this.player.on('status', (s) => this.emit(s));
+    const player = await promisify(this.client.launch).bind(this.client)(DefaultMediaReceiver);
+    player.on('status', (s) => this.emit(s));
+    // Receiver app closed from elsewhere (phone, TV remote, another sender).
+    player.on('close', () => this.dropPlayer());
+    this.player = player;
   }
 
   async close(): Promise<void> {
-    this.player?.close();
-    this.client.close();
+    // Application.close() dereferences its connection, which is already null once the
+    // receiver closed on its own — don't let that skip closing the client.
+    try {
+      this.player?.close();
+    } catch {}
+    this.player = undefined;
+    try {
+      this.client.close();
+    } catch {}
+  }
+
+  private dropPlayer(): void {
+    if (!this.player) {
+      return;
+    }
+    this.player = undefined;
+    this.statusCallback?.({
+      playerState: 'IDLE',
+      currentTime: 0,
+      duration: this.lastMedia?.duration,
+      title: this.lastMedia?.metadata?.title,
+    });
   }
 
   async loadVideo({ title, videoUrl, subtitlesUrl }: LoadVideoOptions): Promise<void> {

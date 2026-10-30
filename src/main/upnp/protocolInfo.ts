@@ -4,11 +4,11 @@ import { extractTag } from './xml';
 const CONNECTION_MANAGER = 'urn:schemas-upnp-org:service:ConnectionManager:1';
 
 export interface ProtocolInfo {
-  videoMimes: ReadonlySet<string>;
+  videoMimes: readonly string[];
   // Subset of videoMimes whose protocolInfo additional-info field is `*` — the
   // renderer accepts the container with any codec inside. Lets us lift the
   // direct-play codec allow-list per-MIME in [[checkCompat]].
-  wildcardVideoMimes: ReadonlySet<string>;
+  wildcardVideoMimes: readonly string[];
 }
 
 // Parse the renderer's ConnectionManager::GetProtocolInfo Sink list. Each entry is
@@ -31,5 +31,5 @@ export async function fetchProtocolInfo(controlUrl: string): Promise<ProtocolInf
       }
     }
   }
-  return { videoMimes, wildcardVideoMimes };
+  return { videoMimes: [...videoMimes], wildcardVideoMimes: [...wildcardVideoMimes] };
 }

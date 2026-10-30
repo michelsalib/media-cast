@@ -7,7 +7,10 @@ export async function soapCall(
   controlUrl: string,
   action: string,
   args: Record<string, string>,
-  serviceType: string = AV_TRANSPORT
+  serviceType: string = AV_TRANSPORT,
+  // quiet: skip the envelope logs — used by the status polling, which would otherwise
+  // bury everything else at several calls per second.
+  { quiet = false }: { quiet?: boolean } = {}
 ): Promise<string> {
   const argXml = Object.entries(args)
     .map(([k, v]) => `<${k}>${escapeXml(v)}</${k}>`)
@@ -21,7 +24,9 @@ export async function soapCall(
     `</s:Body>` +
     `</s:Envelope>`;
 
-  console.log(`[soap →] ${action}\n${body}`);
+  if (!quiet) {
+    console.log(`[soap →] ${action}\n${body}`);
+  }
 
   const url = new URL(controlUrl);
   return new Promise((resolve, reject) => {
@@ -35,6 +40,9 @@ export async function soapCall(
           'Content-Type': 'text/xml; charset="utf-8"',
           'Content-Length': Buffer.byteLength(body),
           SOAPACTION: `"${serviceType}#${action}"`,
+          // No keep-alive: Node never retries, so a request handed to a socket the TV is
+          // closing fails with ECONNRESET. Most UPnP stacks close after each call anyway.
+          Connection: 'close',
         },
       },
       (res) => {
@@ -44,7 +52,9 @@ export async function soapCall(
           text += c;
         });
         res.on('end', () => {
-          console.log(`[soap ←] ${action} HTTP ${res.statusCode}\n${text}`);
+          if (!quiet || (res.statusCode ?? 0) >= 400) {
+            console.log(`[soap ←] ${action} HTTP ${res.statusCode}\n${text}`);
+          }
           if (res.statusCode && res.statusCode >= 400) {
             reject(new Error(`SOAP ${action} failed: HTTP ${res.statusCode}\n${text}`));
             return;

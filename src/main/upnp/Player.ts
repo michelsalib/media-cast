@@ -1,4 +1,5 @@
 import type { LoadVideoOptions, PlayerState, PlayerStatus, Renderer } from '../../shared/types';
+import { DIRECT_PLAY_FEATURES, TRANSCODED_FEATURES } from './dlna';
 import { UpnpEventing } from './eventing';
 import { soapCall } from './soap';
 import { escapeXml, extractAttr, extractTag, unescapeXml } from './xml';
@@ -9,6 +10,8 @@ export interface UpnpPlayerInfo {
   targetIp: string;
 }
 
+const STATE_EVENT_STALE_MS = 10_000;
+
 export class UpnpPlayer implements Renderer {
   private readonly controlUrl: string;
   private readonly eventing: UpnpEventing;
@@ -17,6 +20,7 @@ export class UpnpPlayer implements Renderer {
   private duration?: number;
   private currentTime = 0;
   private playerState: PlayerState = 'IDLE';
+  private lastStateEventAt = 0;
 
   constructor(info: UpnpPlayerInfo) {
     this.controlUrl = info.avTransportControlUrl;
@@ -53,6 +57,7 @@ export class UpnpPlayer implements Renderer {
     subtitlesUrl,
     subtitlesFormat,
     duration,
+    size,
   }: LoadVideoOptions): Promise<void> {
     this.currentTitle = title;
     this.duration = duration;
@@ -65,12 +70,17 @@ export class UpnpPlayer implements Renderer {
       subtitlesUrl,
       subtitlesFormat,
       duration,
+      size,
     });
-    // LG TVs return UPnP 701 "Transition not available" on SetAVTransportURI while their
-    // vendor-specific LG_TRANSITIONING state is active (the previous session's close() —
-    // Stop + clear-URI — leaves the TV transitioning across an app restart). Wait it out
-    // before issuing the new URI.
-    await this.waitWhileTransitioning(5_000);
+    // Stop → SetAVTransportURI → Play is the spec sequence. Swapping the URI under a
+    // playing renderer makes it tear down a live pipeline mid-request, and LG answers
+    // UPnP 701 "Transition not available" while its vendor LG_TRANSITIONING state is
+    // active — so stop first, then wait the transition out before issuing the new URI.
+    const before = await this.waitWhileTransitioning(5_000);
+    if (before !== 'STOPPED' && before !== 'NO_MEDIA_PRESENT') {
+      await soapCall(this.controlUrl, 'Stop', { InstanceID: '0' }).catch(() => {});
+      await this.waitWhileTransitioning(5_000);
+    }
     await soapCall(this.controlUrl, 'SetAVTransportURI', {
       InstanceID: '0',
       CurrentURI: videoUrl,
@@ -92,7 +102,13 @@ export class UpnpPlayer implements Renderer {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
       try {
-        const xml = await soapCall(this.controlUrl, 'GetTransportInfo', { InstanceID: '0' });
+        const xml = await soapCall(
+          this.controlUrl,
+          'GetTransportInfo',
+          { InstanceID: '0' },
+          undefined,
+          { quiet: true }
+        );
         const state = extractTag(xml, 'CurrentTransportState')?.trim();
         // LG reports vendor-specific "LG_TRANSITIONING" instead of the spec "TRANSITIONING";
         // match any state containing "TRANSITIONING" so we don't proceed prematurely.
@@ -128,7 +144,13 @@ export class UpnpPlayer implements Renderer {
       return;
     }
     try {
-      const positionXml = await soapCall(this.controlUrl, 'GetPositionInfo', { InstanceID: '0' });
+      const positionXml = await soapCall(
+        this.controlUrl,
+        'GetPositionInfo',
+        { InstanceID: '0' },
+        undefined,
+        { quiet: true }
+      );
       const durationStr = extractTag(positionXml, 'TrackDuration');
       const relTimeStr = extractTag(positionXml, 'RelTime');
       if (durationStr) {
@@ -141,8 +163,19 @@ export class UpnpPlayer implements Renderer {
         this.currentTime = hmsToSeconds(relTimeStr);
       }
 
-      const transportXml = await soapCall(this.controlUrl, 'GetTransportInfo', { InstanceID: '0' });
-      this.playerState = mapTransportState(extractTag(transportXml, 'CurrentTransportState'));
+      // GENA already pushes TransportState; only poll it when events have gone quiet
+      // (subscription lost, or a renderer that doesn't event it) to halve the SOAP load
+      // on the TV.
+      if (Date.now() - this.lastStateEventAt > STATE_EVENT_STALE_MS) {
+        const transportXml = await soapCall(
+          this.controlUrl,
+          'GetTransportInfo',
+          { InstanceID: '0' },
+          undefined,
+          { quiet: true }
+        );
+        this.playerState = mapTransportState(extractTag(transportXml, 'CurrentTransportState'));
+      }
 
       this.emit();
     } catch {
@@ -171,6 +204,7 @@ export class UpnpPlayer implements Renderer {
     const state = extractAttr(inner, 'TransportState', 'val');
     if (state) {
       this.playerState = mapTransportState(state);
+      this.lastStateEventAt = Date.now();
     }
 
     const dur = extractAttr(inner, 'CurrentTrackDuration', 'val');
@@ -214,6 +248,10 @@ function hmsToSeconds(hms: string): number {
 }
 
 function mapTransportState(state: string | undefined): PlayerState {
+  // LG reports vendor-specific LG_TRANSITIONING — same meaning as the spec word.
+  if (state?.includes('TRANSITIONING')) {
+    return 'BUFFERING';
+  }
   switch (state) {
     case 'PLAYING':
       return 'PLAYING';
@@ -221,8 +259,6 @@ function mapTransportState(state: string | undefined): PlayerState {
     case 'PAUSED_RECORDING':
     case 'PAUSED':
       return 'PAUSED';
-    case 'TRANSITIONING':
-      return 'BUFFERING';
     default:
       return 'IDLE';
   }
@@ -236,6 +272,7 @@ interface DidlOptions {
   subtitlesUrl?: string;
   subtitlesFormat?: 'vtt' | 'srt' | 'smi';
   duration?: number;
+  size?: number;
 }
 
 function buildDidlMetadata({
@@ -246,6 +283,7 @@ function buildDidlMetadata({
   subtitlesUrl,
   subtitlesFormat = 'smi',
   duration,
+  size,
 }: DidlOptions): string {
   const subMime =
     subtitlesFormat === 'smi'
@@ -259,15 +297,14 @@ function buildDidlMetadata({
       `<res protocolInfo="http-get:*:${subMime}:*">${escapeXml(subtitlesUrl)}</res>`
     : '';
 
-  // Transcoded: MPEG-TS, time-based seek (OP=10), CI=1, FLAGS bit 30 (lsop_TimeBasedSeek) set.
-  // Direct play: native container, byte-range seek (OP=01), CI=0, no PN so the TV doesn't
-  // reject the file on a profile/level mismatch.
-  const videoProtocolInfo = videoTranscoded
-    ? `http-get:*:${videoMimeType}:DLNA.ORG_PN=MPEG_TS_SD_EU_ISO;DLNA.ORG_OP=10;DLNA.ORG_CI=1;DLNA.ORG_FLAGS=CD700000000000000000000000000000`
-    : `http-get:*:${videoMimeType}:DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000`;
+  const videoProtocolInfo = `http-get:*:${videoMimeType}:${
+    videoTranscoded ? TRANSCODED_FEATURES : DIRECT_PLAY_FEATURES
+  }`;
 
   const durationAttr =
     duration && Number.isFinite(duration) ? ` duration="${secondsToHmsMs(duration)}"` : '';
+  // Direct play only: lets the renderer size byte-range seeks without a HEAD first.
+  const sizeAttr = size && !videoTranscoded ? ` size="${size}"` : '';
   // pv:subtitleFileUri / Type — non-standard attrs many old DLNA TVs (incl. Samsung) actually honor
   // for sidecar subtitles, in addition to / instead of sec:CaptionInfoEx.
   const pvSubsAttrs = subtitlesUrl
@@ -284,7 +321,7 @@ function buildDidlMetadata({
     `<dc:title>${escapeXml(title)}</dc:title>` +
     `<upnp:class>object.item.videoItem.movie</upnp:class>` +
     `<upnp:storageMedium>UNKNOWN</upnp:storageMedium>` +
-    `<res protocolInfo="${videoProtocolInfo}"${durationAttr}${pvSubsAttrs}>${escapeXml(videoUrl)}</res>` +
+    `<res protocolInfo="${videoProtocolInfo}"${durationAttr}${sizeAttr}${pvSubsAttrs}>${escapeXml(videoUrl)}</res>` +
     captionInfo +
     `</item>` +
     `</DIDL-Lite>`

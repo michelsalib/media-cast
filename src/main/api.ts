@@ -21,8 +21,7 @@ export function createMainApi({ controller, scanners, updater }: MainApiDeps) {
       ffmpegVersion: await getFfmpegVersion(),
     }),
     probe: (videoPath: string) => probe(videoPath),
-    thumbnail: (videoPath: string, width?: number, height?: number) =>
-      thumbnail(videoPath, width, height),
+    thumbnail: (videoPath: string, width?: number) => thumbnail(videoPath, width),
     connect: (deviceId: string) => controller.connect(deviceId),
     disconnect: () => controller.disconnect(),
     load: (
@@ -57,5 +56,10 @@ export function sendEvent<K extends keyof MainEvents>(
   channel: K,
   payload: MainEvents[K]
 ): void {
+  // Renderer events (GENA NOTIFY, cast status) can still arrive between the window
+  // closing and shutdown finishing; send() on a destroyed window throws.
+  if (window.isDestroyed()) {
+    return;
+  }
   window.webContents.send(channel, payload);
 }

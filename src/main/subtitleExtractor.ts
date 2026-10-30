@@ -1,10 +1,12 @@
 import { readFile } from 'node:fs/promises';
+import { extname } from 'node:path';
 import { extractSubtitles as ffmpegExtractSubtitles, type SubtitleFormat } from './ffmpeg';
 
 export async function extractSubtitles(
   videoPath: string,
   subtitlesPathOrIndex?: string | number,
-  format: SubtitleFormat = 'vtt'
+  format: SubtitleFormat = 'vtt',
+  { language }: { language?: string } = {}
 ): Promise<Buffer | undefined> {
   // ffmpeg has no SMI muxer — request SRT bytes then convert in JS.
   const rawFormat: 'srt' | 'vtt' = format === 'smi' ? 'srt' : format;
@@ -14,10 +16,11 @@ export async function extractSubtitles(
   }
 
   if (format === 'smi') {
-    return Buffer.from(srtToSmi(raw.toString('utf8')), 'utf8');
+    return Buffer.from(srtToSmi(decodeText(raw), language), 'utf8');
   }
 
-  return raw;
+  // Served as charset=utf-8 (and WebVTT is UTF-8 by spec).
+  return Buffer.from(decodeText(raw), 'utf8');
 }
 
 async function readRaw(
@@ -36,20 +39,51 @@ async function readRaw(
     );
   }
 
-  const lower = subtitlesPathOrIndex.toLowerCase();
+  const ext = extname(subtitlesPathOrIndex).toLowerCase();
 
-  if (format === 'srt' && lower.endsWith('.srt')) {
-    return readFile(subtitlesPathOrIndex);
-  }
-  if (format === 'vtt' && lower.endsWith('.vtt')) {
+  if (ext === `.${format}`) {
     return readFile(subtitlesPathOrIndex);
   }
 
-  if (lower.endsWith('.srt') || lower.endsWith('.ass') || lower.endsWith('.vtt')) {
-    return ffmpegExtractSubtitles({ source: 'external', path: subtitlesPathOrIndex }, format);
+  if (TEXT_SUBTITLE_EXTENSIONS.has(ext)) {
+    // ffmpeg rejects non-UTF-8 text ("Invalid UTF-8 in decoded subtitles text") unless
+    // told the charset.
+    return ffmpegExtractSubtitles(
+      {
+        source: 'external',
+        path: subtitlesPathOrIndex,
+        charenc: await detectSubtitleCharenc(subtitlesPathOrIndex),
+      },
+      format
+    );
   }
 
-  return undefined;
+  throw new Error(`Unsupported subtitle file: ${ext || subtitlesPathOrIndex}`);
+}
+
+// Text formats ffmpeg can read standalone. (`.sub` is ambiguous — MicroDVD needs a
+// frame rate, VobSub needs its `.idx` — so it isn't accepted.)
+export const TEXT_SUBTITLE_EXTENSIONS = new Set(['.srt', '.vtt', '.ass', '.ssa']);
+
+// Sidecar subtitles are very often Windows-1252 (the norm for French/Western European
+// releases), not UTF-8. Anything that isn't valid UTF-8 is treated as Windows-1252,
+// the superset of Latin-1 those files are actually written in.
+export async function detectSubtitleCharenc(path: string): Promise<string | undefined> {
+  const bytes = await readFile(path);
+  return isUtf8(bytes) ? undefined : 'CP1252';
+}
+
+function isUtf8(bytes: Buffer): boolean {
+  try {
+    new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function decodeText(bytes: Buffer): string {
+  return new TextDecoder(isUtf8(bytes) ? 'utf-8' : 'windows-1252').decode(bytes);
 }
 
 interface SrtCue {
@@ -86,12 +120,28 @@ function parseSrt(srt: string): SrtCue[] {
   return cues;
 }
 
-function srtToSmi(srt: string): string {
+// ISO 639-2 (what Matroska/ffprobe tag tracks with) → the BCP-47 tag SAMI classes use.
+const SAMI_LANGUAGES: Record<string, { name: string; lang: string }> = {
+  eng: { name: 'English', lang: 'en-US' },
+  fre: { name: 'French', lang: 'fr-FR' },
+  fra: { name: 'French', lang: 'fr-FR' },
+  spa: { name: 'Spanish', lang: 'es-ES' },
+  ger: { name: 'German', lang: 'de-DE' },
+  deu: { name: 'German', lang: 'de-DE' },
+  ita: { name: 'Italian', lang: 'it-IT' },
+  por: { name: 'Portuguese', lang: 'pt-PT' },
+  dut: { name: 'Dutch', lang: 'nl-NL' },
+  nld: { name: 'Dutch', lang: 'nl-NL' },
+};
+
+function srtToSmi(srt: string, language: string | undefined): string {
+  // Unknown language (external files carry none): English is what TVs fall back to.
+  const { name, lang } = SAMI_LANGUAGES[language ?? ''] ?? SAMI_LANGUAGES.eng;
   const cues = parseSrt(srt);
   const lines: string[] = [];
   for (const cue of cues) {
-    lines.push(`<SYNC Start=${cue.startMs}><P Class=FRCC>${cue.text}</P></SYNC>`);
-    lines.push(`<SYNC Start=${cue.endMs}><P Class=FRCC>&nbsp;</P></SYNC>`);
+    lines.push(`<SYNC Start=${cue.startMs}><P Class=SUBCC>${cue.text}</P></SYNC>`);
+    lines.push(`<SYNC Start=${cue.endMs}><P Class=SUBCC>&nbsp;</P></SYNC>`);
   }
 
   return [
@@ -101,7 +151,7 @@ function srtToSmi(srt: string): string {
     '<STYLE TYPE="text/css">',
     '<!--',
     'P { font-family: Arial; font-weight: normal; color: white; background-color: black; text-align: center; }',
-    '.FRCC { Name: French; lang: fr-FR; SAMIType: CC; }',
+    `.SUBCC { Name: ${name}; lang: ${lang}; SAMIType: CC; }`,
     '-->',
     '</STYLE>',
     '</HEAD>',

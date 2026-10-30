@@ -12,6 +12,7 @@ import {
   Accordion,
   AccordionDetails,
   AccordionSummary,
+  Alert,
   alpha,
   Backdrop,
   Box,
@@ -22,6 +23,7 @@ import {
   ListItemText,
   Menu,
   MenuItem,
+  Snackbar,
   Stack,
   Switch,
   type SxProps,
@@ -34,7 +36,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { FFProbeData } from '../../../main/ffmpeg';
 import { type CompatReport, checkCompat } from '../../../shared/compat';
 import type { Device } from '../../../shared/types';
-import { api, pathFor } from '../ipc';
+import { api, errorMessage, pathFor } from '../ipc';
 import type { AudioSelection } from './AudioSelection';
 import AudioSelector from './AudioSelector';
 import { NO_SUBTITLES, type SubtitlesSelection } from './SubtitlesSelection';
@@ -45,6 +47,10 @@ type Props = SxProps & {
   children: React.JSX.Element;
   device: Device | null;
 };
+
+const VIDEO_EXTENSIONS = ['.mp4', '.mkv', '.avi'];
+// Text formats main can extract or burn (see TEXT_SUBTITLE_EXTENSIONS in subtitleExtractor).
+const SUBTITLE_EXTENSIONS = ['.srt', '.vtt', '.ass', '.ssa'];
 
 const glow = keyframes`
   0%, 100% { box-shadow: 0 0 0 0 rgba(124,77,255,0.5); }
@@ -67,6 +73,8 @@ export default function Dropper(props: Props): React.JSX.Element {
   const [thumbnail, setThumbnail] = useState<Uint8Array | undefined>(undefined);
   const [probeData, setProbeData] = useState<FFProbeData | undefined>(undefined);
   const [burnSubtitles, setBurnSubtitles] = useState(false);
+  const [casting, setCasting] = useState(false);
+  const [castError, setCastError] = useState<string | undefined>();
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const [marqueeDistance, setMarqueeDistance] = useState(0);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -90,12 +98,21 @@ export default function Dropper(props: Props): React.JSX.Element {
   const effectiveBurn = showBurnToggle && (forceBurn || burnSubtitles);
 
   function ingest(files: Iterable<File>): void {
+    const rejected: string[] = [];
     for (const file of files) {
-      if (file.name.endsWith('mp4') || file.name.endsWith('mkv')) {
+      const ext = extensionOf(file.name);
+      if (VIDEO_EXTENSIONS.includes(ext)) {
         setVideo(file);
-      } else {
+      } else if (SUBTITLE_EXTENSIONS.includes(ext)) {
         setSubs(file);
+      } else {
+        rejected.push(file.name);
       }
+    }
+    if (rejected.length > 0) {
+      setCastError(
+        `Unsupported file: ${rejected.join(', ')} — expected ${[...VIDEO_EXTENSIONS, ...SUBTITLE_EXTENSIONS].join(' ')}`
+      );
     }
   }
 
@@ -140,7 +157,12 @@ export default function Dropper(props: Props): React.JSX.Element {
         : subtitlesSelection.type === 'internal'
           ? subtitlesSelection.index
           : undefined;
-    void api.load(pathFor(video), subsArg, audioSelection?.index, effectiveBurn);
+    setCasting(true);
+    setCastError(undefined);
+    api
+      .load(pathFor(video), subsArg, audioSelection?.index, effectiveBurn)
+      .catch((err: unknown) => setCastError(errorMessage(err)))
+      .finally(() => setCasting(false));
   }
 
   useEffect(() => {
@@ -149,12 +171,14 @@ export default function Dropper(props: Props): React.JSX.Element {
         return;
       }
 
-      const thumbnail = await api.thumbnail(pathFor(video));
-
-      setThumbnail(thumbnail);
+      try {
+        setThumbnail(await api.thumbnail(pathFor(video)));
+      } catch {
+        setThumbnail(undefined);
+      }
     }
 
-    generate();
+    void generate();
   }, [video]);
 
   useEffect(() => {
@@ -177,25 +201,34 @@ export default function Dropper(props: Props): React.JSX.Element {
       videoFileName: video.name,
       probeData,
       deviceType: props.device.type,
+      acceptedVideoMimes: props.device.acceptedVideoMimes,
+      acceptedWildcardVideoMimes: props.device.acceptedWildcardVideoMimes,
       burnSubtitles: effectiveBurn,
       audioIndex: audioSelection?.index,
     });
   }, [video, probeData, props.device, effectiveBurn, audioSelection]);
 
-  const canCast = !!video && connected;
+  const canCast = !!video && connected && !casting;
   const durationSec = probeData ? Number(probeData.format.duration) : Number.NaN;
   const durationLabel = Number.isFinite(durationSec) ? format(durationSec * 1000) : null;
   const caption = !video
-    ? 'Drag .mp4 / .mkv and optionally a subtitle file'
+    ? `Drag ${VIDEO_EXTENSIONS.join(' / ')} and optionally a subtitle file`
     : (durationLabel ?? formatBytes(video.size));
   const hasAudio = probeData?.streams.some((s) => s.codec_type === 'audio') ?? false;
-  const thumbnailUrl = useMemo(
-    () =>
-      thumbnail
-        ? `data:image/png;base64,${btoa(String.fromCharCode(...new Uint8Array(thumbnail)))}`
-        : undefined,
-    [thumbnail]
-  );
+  // A Blob URL, not a base64 data URL: spreading a large frame into
+  // String.fromCharCode overflows the argument limit. Created in the same effect that
+  // revokes it — StrictMode runs the cleanup once on mount, which would otherwise
+  // revoke a memoized URL that is still on screen.
+  const [thumbnailUrl, setThumbnailUrl] = useState<string | undefined>();
+  useEffect(() => {
+    if (!thumbnail) {
+      setThumbnailUrl(undefined);
+      return;
+    }
+    const url = URL.createObjectURL(new Blob([new Uint8Array(thumbnail)], { type: 'image/jpeg' }));
+    setThumbnailUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [thumbnail]);
 
   return (
     <Box onDrop={drop} onDragOver={dragOver} onDragLeave={dragLeave} sx={{ height: '100%' }}>
@@ -203,7 +236,7 @@ export default function Dropper(props: Props): React.JSX.Element {
       <input
         ref={fileInput}
         type="file"
-        accept=".mp4,.mkv,.srt,.vtt,.ass,.ssa,.sub"
+        accept={[...VIDEO_EXTENSIONS, ...SUBTITLE_EXTENSIONS].join(',')}
         multiple
         hidden
         onChange={onFilesPicked}
@@ -519,6 +552,15 @@ export default function Dropper(props: Props): React.JSX.Element {
           </Box>
         </AccordionDetails>
       </Accordion>
+      <Snackbar
+        open={!!castError}
+        onClose={() => setCastError(undefined)}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+      >
+        <Alert severity="error" variant="filled" onClose={() => setCastError(undefined)}>
+          {castError}
+        </Alert>
+      </Snackbar>
       <Backdrop
         open={isOver}
         sx={{
@@ -646,6 +688,11 @@ function CompatChip({ report }: { report: CompatReport }): React.JSX.Element {
       </Box>
     </Tooltip>
   );
+}
+
+function extensionOf(name: string): string {
+  const idx = name.lastIndexOf('.');
+  return idx >= 0 ? name.slice(idx).toLowerCase() : '';
 }
 
 function formatBytes(bytes: number): string {

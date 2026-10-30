@@ -39,3 +39,9 @@ export function onEvent<K extends keyof MainEvents>(
 export function pathFor(file: File): string {
   return window.ipc.pathFor(file);
 }
+
+// Errors cross IPC as message only, wrapped: "Error invoking remote method 'load': Error: …".
+export function errorMessage(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.replace(/^Error invoking remote method '[^']+': (?:\w*Error: )?/, '');
+}

@@ -1,6 +1,6 @@
-import { networkInterfaces } from 'node:os';
 import { Bonjour, type Browser, type Service } from 'bonjour-service';
 import type { Device, DevicesScanner } from '../../shared/types';
+import { localIPv4Addresses } from '../network';
 
 export interface ChromecastDevice extends Device {
   type: 'chromecast';
@@ -40,7 +40,11 @@ export class ChromecastDevicesScanner implements DevicesScanner<ChromecastDevice
     this.teardownInstances();
     const optsList: BonjourOpts[] = addrs.length > 0 ? addrs.map((a) => ({ interface: a })) : [{}];
     for (const opts of optsList) {
-      const bonjour = new Bonjour(opts);
+      // Without an error callback bonjour-service throws multicast-dns errors
+      // (EADDRINUSE/EACCES on the mDNS port) out of a socket callback — a main crash.
+      const bonjour = new Bonjour(opts, (err: Error) =>
+        console.error('[mdns] error:', err.message)
+      );
       const browser = bonjour.find({ type: 'googlecast' });
       browser.on('up', (service) => this.upsert(service));
       browser.on('down', (service) => this.remove(service));
@@ -98,12 +102,4 @@ export class ChromecastDevicesScanner implements DevicesScanner<ChromecastDevice
     clearInterval(this.reconcileTimer);
     this.teardownInstances();
   }
-}
-
-function localIPv4Addresses(): string[] {
-  return Object.values(networkInterfaces())
-    .flat()
-    .filter((i) => i?.family === 'IPv4' && !i.internal)
-    .map((i) => i?.address)
-    .filter((a): a is string => !!a);
 }

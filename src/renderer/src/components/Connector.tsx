@@ -1,5 +1,6 @@
 import { Cast, CheckCircle, Refresh, Tv } from '@mui/icons-material';
 import {
+  Alert,
   alpha,
   Box,
   Card,
@@ -14,7 +15,7 @@ import {
 } from '@mui/material';
 import { useEffect, useState } from 'react';
 import type { Device } from '../../../shared/types';
-import { api, onEvent } from '../ipc';
+import { api, errorMessage, onEvent } from '../ipc';
 
 type Props = {
   onChange?: (state: ConnectorState, device: Device | null) => void;
@@ -41,6 +42,10 @@ export function Connector({ onChange }: Props): React.JSX.Element {
   const [devices, setDevices] = useState<Device[]>([]);
   const [state, setState] = useState<ConnectorState>('DISCONNECTED');
   const [connectedId, setConnectedId] = useState<string | null>(null);
+  // The device as it was when connected. Scans drop a TV that misses a few SSDP replies
+  // (LG does) — that must not bounce the app back to this list mid-session.
+  const [connectedDevice, setConnectedDevice] = useState<Device | null>(null);
+  const [error, setError] = useState<string | undefined>();
   const [scanning, setScanning] = useState(false);
   const theme = useTheme();
 
@@ -56,9 +61,9 @@ export function Connector({ onChange }: Props): React.JSX.Element {
   }, []);
 
   useEffect(() => {
-    const device = devices.find((d) => d.id === connectedId) ?? null;
+    const device = devices.find((d) => d.id === connectedId) ?? connectedDevice;
     onChange?.(state, device);
-  }, [state, connectedId, devices, onChange]);
+  }, [state, connectedId, connectedDevice, devices, onChange]);
 
   async function connect(id: string): Promise<void> {
     if (state === 'LOADING') {
@@ -66,13 +71,17 @@ export function Connector({ onChange }: Props): React.JSX.Element {
     }
 
     try {
+      setError(undefined);
       setConnectedId(id);
+      setConnectedDevice(devices.find((d) => d.id === id) ?? null);
       setState('LOADING');
       await api.connect(id);
       setState('CONNECTED');
-    } catch {
+    } catch (err) {
       setConnectedId(null);
+      setConnectedDevice(null);
       setState('DISCONNECTED');
+      setError(errorMessage(err));
     }
   }
 
@@ -118,6 +127,12 @@ export function Connector({ onChange }: Props): React.JSX.Element {
           />
         </IconButton>
       </Stack>
+
+      {error && (
+        <Alert severity="error" onClose={() => setError(undefined)}>
+          Could not connect: {error}
+        </Alert>
+      )}
 
       <Stack direction="row" spacing={2} useFlexGap sx={{ flexWrap: 'wrap' }}>
         {devices.map((d) => {

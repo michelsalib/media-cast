@@ -96,7 +96,7 @@ declare module 'castv2-client' {
 
   export type Callback<T> = (error: Error, result: T) => void;
 
-  export class Client {
+  export class Client extends EventEmitter<ClientEventMap> {
     connect(host: string, callback: Callback<void>): void;
     getStatus(callback: Callback<ClientStatus>): void;
     close(): void;
@@ -115,6 +115,13 @@ declare module 'castv2-client' {
 
   type ApplicationEventMap = {
     status: [MediaStatus];
+    close: [];
+  };
+
+  type ClientEventMap = {
+    error: [Error];
+    status: [ClientStatus];
+    close: [];
   };
 
   export class Application extends EventEmitter<ApplicationEventMap> {
