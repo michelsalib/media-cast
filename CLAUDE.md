@@ -6,7 +6,7 @@ Electron + React + TS app that streams local video to Chromecast and UPnP/DLNA, 
 
 ## Commands
 
-Package manager and script runner is **bun** (`bun install`, lockfile `bun.lock`). Electron's own tooling (electron-vite, electron-builder) still executes on Node (`.nvmrc`); bun only drives the scripts. Dependency postinstalls are blocked by bun except its default-trusted list (electron and sharp are on it) — do not add `trustedDependencies`, it *replaces* that list.
+Package manager and script runner is **bun** (`bun install`, lockfile `bun.lock`). Electron's own tooling (electron-vite, electron-builder) still executes on Node (`.nvmrc`); bun only drives the scripts. Dependency postinstalls are blocked by bun except its default-trusted list (electron and sharp are on it) — do not add `trustedDependencies`, it *replaces* that list. A native dependency whose install script matters gets it redone by our own `postinstall` instead: [download-datachannel.mjs](scripts/download-datachannel.mjs) fetches node-datachannel's N-API prebuild (lipo'd universal on macOS). N-API bindings load in Electron unchanged, so there is no `@electron/rebuild` / `install-app-deps` (`npmRebuild: false`); electron-builder unpacks `.node` files from the asar by itself.
 
 ```bash
 bun run dev               # electron-vite dev (HMR for main/preload/renderer)
@@ -59,7 +59,7 @@ DLNA `protocolInfo` / `contentFeatures.dlna.org` values live in [upnp/dlna.ts](s
 
 ### Torrents ([torrents.ts](src/main/torrents.ts))
 
-- `TorrentStore` (`torrent-stream`, pure JS — WebTorrent was rejected: its native WebRTC/uTP deps need postinstalls bun blocks) opens a magnet link or a `.torrent`/`.magnet` file and serves each video in it on `http://127.0.0.1:<port>/<infoHash>/<fileIndex>/<name>` with byte ranges. Only ranges being read are downloaded.
+- `TorrentStore` (WebTorrent: TCP, uTP via `utp-native`, WebRTC via `node-datachannel` — see Commands for how its binding is installed) opens a magnet link or a `.torrent`/`.magnet` file and serves each video in it on `http://127.0.0.1:<port>/<infoHash>/<fileIndex>/<name>` with byte ranges. Torrents are added `deselect`ed, so only ranges being read are downloaded. The client is created on the first open (dynamic `import('webtorrent')`, ESM-only); check `client.get()` before `add()`, which destroys a duplicate with an error instead of returning it.
 - That URL **is** the video path everywhere: ffmpeg/ffprobe read it directly; [videoSource.ts](src/main/videoSource.ts) covers the rest (`sourceName`/`sourceStem` decode the name, `sendVideo` proxies it for direct play in MediaServer/PreviewServer, movieHash range-fetches it). Use those helpers, not `basename`/`send`, on video paths.
 - Pieces live in `temp/media-cast-torrents/`, wiped at startup and quit. `openTorrent` drops every other torrent except the playing one and the renderer's current pick. Stats are pushed as `torrents` every second.
 

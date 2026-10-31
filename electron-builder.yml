@@ -23,9 +23,12 @@ nsis:
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
 mac:
-  # evermeet.cx only ships x86_64 ffmpeg; the universal merger sees identical bytes
-  # in both arch slices and refuses to dedupe unless told the files are x64-only.
-  x64ArchFiles: Contents/Resources/bin/**
+  # The universal merger refuses a single-arch binary that is byte-identical in both
+  # slices unless it matches this glob. evermeet.cx only ships x86_64 ffmpeg, and native
+  # modules' per-arch prebuilds (utp-native, ws's add-ons…) ship both darwin builds in
+  # one package; each picks its own at runtime. node-datachannel's single binding is
+  # lipo'd universal by scripts/download-datachannel.mjs, which the merger skips.
+  x64ArchFiles: '{Contents/Resources/bin/**,Contents/Resources/app.asar.unpacked/node_modules/*/prebuilds/**}'
   # Both the main executable (entitlements) and nested helpers (entitlementsInherit)
   # need com.apple.security.cs.disable-library-validation so ad-hoc signing + hardened
   # runtime don't reject the pre-signed Electron Framework's Team ID. See issue #2.
