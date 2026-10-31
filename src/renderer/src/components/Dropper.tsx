@@ -26,14 +26,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { FFProbeData } from '../../../main/ffmpeg';
 import { type CompatReport, checkCompat } from '../../../shared/compat';
 import { VIDEO_EXTENSIONS } from '../../../shared/media';
-import { isBitmapSubtitleCodec } from '../../../shared/subtitles';
 import type {
   Device,
   PlayerStatus,
-  PlayingTracks,
   TorrentContents,
   TorrentStats,
-  TrackChange,
   VideoSource,
 } from '../../../shared/types';
 import type { Connection } from '../App';
@@ -41,22 +38,16 @@ import { api, errorMessage, onEvent, pathFor } from '../ipc';
 import { episodeLabel, resolutionLabel, runtimeLabel, subtitleFileName } from '../labels';
 import { cardSx, linkSx, tonalSx } from '../theme';
 import { Artwork, useObjectUrl } from './Artwork';
-import { type AudioSelection, audioChoices } from './AudioSelection';
 import AudioSelector from './AudioSelector';
 import Player from './Player';
 import RemoteButton from './RemoteButton';
 import SubtitleSearchDialog from './SubtitleSearchDialog';
 import SubtitleSizeButton from './SubtitleSizeButton';
 import SubtitleSyncDialog, { type SyncSource } from './SubtitleSyncDialog';
-import {
-  bundledSelection,
-  internalSubtitles,
-  NO_SUBTITLES,
-  type SubtitlesFile,
-  type SubtitlesSelection,
-} from './SubtitlesSelection';
-import SubtitlesSelector, { isSupported } from './SubtitlesSelector';
+import { isSupported, subtitlesArg } from './SubtitlesSelection';
+import SubtitlesSelector from './SubtitlesSelector';
 import { TorrentChip, TorrentPicker } from './Torrent';
+import { useTrackSelection } from './useTrackSelection';
 import VideoInfoButton from './VideoInfoButton';
 
 type Props = {
@@ -91,11 +82,6 @@ export default function Dropper({
   const [torrentStats, setTorrentStats] = useState<TorrentStats[]>([]);
   const [resizableSubtitles, setResizableSubtitles] = useState(false);
   const [subtitleScale, setSubtitleScale] = useState(1);
-  const [subs, setSubs] = useState<SubtitlesFile | undefined>();
-  // The subtitle files in the torrent of the video picked.
-  const [torrentSubs, setTorrentSubs] = useState<SubtitlesFile[]>([]);
-  const [subtitlesSelection, setSubtitlesSelection] = useState<SubtitlesSelection>(NO_SUBTITLES);
-  const [audioSelection, setAudioSelection] = useState<AudioSelection | undefined>();
   const [thumbnail, setThumbnail] = useState<Uint8Array | undefined>(undefined);
   const [probeData, setProbeData] = useState<FFProbeData | undefined>(undefined);
   const [release, setRelease] = useState<ReleaseInfo | undefined>();
@@ -111,6 +97,11 @@ export default function Dropper({
   const fileInput = useRef<HTMLInputElement>(null);
 
   const device = connection?.device ?? null;
+  const selection = useTrackSelection(video, probeData, device?.type);
+  const { subs, torrentSubs, audio: audioSelection, subtitles: subtitlesSelection } = selection;
+  // For the listeners registered once.
+  const selectionRef = useRef(selection);
+  selectionRef.current = selection;
   const hasSubs = subtitlesSelection.type !== 'no subtitles';
   const showBurnToggle = device?.type === 'upnp' && hasSubs;
   const bitmapSubs = subtitlesSelection.type === 'internal' && subtitlesSelection.bitmap;
@@ -126,11 +117,8 @@ export default function Dropper({
     return bitmapSubs || subtitleScale !== 1 || burnSubtitles;
   }
   const videoPath = video?.path;
-  // For the listeners registered once.
   const videoPathRef = useRef(videoPath);
   videoPathRef.current = videoPath;
-  const torrentSubsRef = useRef(torrentSubs);
-  torrentSubsRef.current = torrentSubs;
   const statsFor = (infoHash?: string): TorrentStats | undefined =>
     torrentStats.find((s) => s.infoHash === infoHash);
   // Text tracks only: image subtitles have no lines to show or retime.
@@ -158,11 +146,10 @@ export default function Dropper({
         setResizableSubtitles(!!now?.resizableSubtitles);
         const path = now?.subtitlesPathOrIndex;
         if (now?.videoPath !== videoPathRef.current || typeof path !== 'string') return;
-        // Already offered with the torrent.
-        if (torrentSubsRef.current.some((s) => s.path === path)) return;
-        setSubs((prev) =>
-          prev?.path === path ? prev : { name: path.split(/[\\/]/).pop() ?? path, path }
-        );
+        const { subs, torrentSubs, addSubtitles } = selectionRef.current;
+        // Already offered with the torrent, or already the added one.
+        if (subs?.path === path || torrentSubs.some((s) => s.path === path)) return;
+        addSubtitles({ name: path.split(/[\\/]/).pop() ?? path, path });
       }),
     []
   );
@@ -200,7 +187,7 @@ export default function Dropper({
       } else if (TORRENT_EXTENSIONS.includes(ext)) {
         void openTorrent(pathFor(file));
       } else if (SUBTITLE_EXTENSIONS.includes(ext)) {
-        setSubs({ name: file.name, path: pathFor(file) });
+        selection.addSubtitles({ name: file.name, path: pathFor(file) });
       } else {
         rejected.push(file.name);
       }
@@ -291,32 +278,16 @@ export default function Dropper({
     void generate();
   }, [video]);
 
+  // The one probe of the video ready: its tracks, defaults and compatibility all read it.
+  // Cleared at once, so nothing is read from the previous video's meanwhile.
   useEffect(() => {
-    if (!video) {
-      setProbeData(undefined);
-      return;
-    }
-    let cancelled = false;
-    api.probe(video.path).then((data) => {
-      if (!cancelled) setProbeData(data);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [video]);
-
-  useEffect(() => {
-    setTorrentSubs([]);
-    if (!video?.infoHash) return;
+    setProbeData(undefined);
+    if (!video) return;
     let cancelled = false;
     api
-      .torrentSubtitles(video.path)
-      .then(
-        (files) =>
-          !cancelled &&
-          setTorrentSubs(files.map((f) => ({ ...f, label: subtitleFileName(f.label) })))
-      )
-      .catch(() => {});
+      .probe(video.path)
+      .then((data) => !cancelled && setProbeData(data))
+      .catch((err) => !cancelled && setCastError(errorMessage(err)));
     return () => {
       cancelled = true;
     };
@@ -368,7 +339,7 @@ export default function Dropper({
       ? `${subtitlesSelection.name} subtitles`
       : subtitlesSelection.type === 'external'
         ? subtitlesSelection.label
-          ? `${subtitlesSelection.label} subtitles`
+          ? `${subtitleFileName(subtitlesSelection.label)} subtitles`
           : 'Added subtitles'
         : undefined;
 
@@ -384,12 +355,12 @@ export default function Dropper({
     if (casting) {
       return 'A video is already starting';
     }
-    const subsArg =
-      subtitlesSelection.type === 'external'
-        ? subtitlesSelection.path
-        : subtitlesSelection.type === 'internal'
-          ? subtitlesSelection.index
-          : undefined;
+    // The phone may play on another screen than the one the subtitles were picked for.
+    if (!isSupported(subtitlesSelection, target.type)) {
+      const message = 'Image subtitles can’t be shown on a Chromecast: pick other subtitles';
+      setCastError(message);
+      return message;
+    }
     setCasting(true);
     setCastError(undefined);
     try {
@@ -398,7 +369,12 @@ export default function Dropper({
       if (!connected && !(await onConnect(target))) {
         return `Couldn’t connect to ${target.name}`;
       }
-      await api.load(video.path, subsArg, audioSelection?.index, burnOn(target));
+      await api.load(
+        video.path,
+        subtitlesArg(subtitlesSelection),
+        audioSelection?.index,
+        burnOn(target)
+      );
       setNowPlaying({ thumbnail, title, details, infoHash: video.infoHash });
       setBrowsing(false);
       return undefined;
@@ -411,100 +387,37 @@ export default function Dropper({
     }
   }
 
-  // The phone remote's Play goes through the same play(), with the state of this render.
+  // The phone remote's Play and picks run here with the state of this render, on the video
+  // the phone was shown only (main checked it; the window may have moved on since).
   const playRef = useRef(play);
   playRef.current = play;
-  useEffect(
-    () =>
-      onEvent('remoteLaunch', ({ requestId, device: target }) => {
-        void playRef.current(target).then((error) => api.remoteDone(requestId, error));
-      }),
-    []
-  );
-
-  // The phone remote's audio/subtitle pick for what is ready, applied as if picked here.
-  async function pickTracks(change: TrackChange): Promise<void> {
-    if (!probeData) throw new Error('The video is still being read');
-    if (change.audioIndex !== undefined) {
-      const audio = audioChoices(probeData)[change.audioIndex];
-      if (!audio) throw new Error('Unknown audio track');
-      setAudioSelection(audio);
-    }
-    const choice = change.subtitles;
-    if (choice === null) {
-      setSubtitlesSelection(NO_SUBTITLES);
-    } else if (choice === 'external') {
-      if (!subs) throw new Error('No subtitle file was added to this video');
-      setSubtitlesSelection({ type: 'external', name: subs.name, path: subs.path });
-    } else if (typeof choice === 'number') {
-      const track = internalSubtitles(probeData)[choice];
-      if (!track) throw new Error('Unknown subtitle track');
-      if (!isSupported(track, device?.type)) {
-        throw new Error('Image subtitles can’t be shown on a Chromecast');
-      }
-      setSubtitlesSelection(track);
-    } else if (typeof choice === 'string') {
-      const file = torrentSubs[Number(choice.slice(5))];
-      if (!file) throw new Error('Unknown subtitle file');
-      await api.fetchTorrentSubtitles(file.path);
-      setSubtitlesSelection(bundledSelection(file));
-    }
-  }
-  const pickTracksRef = useRef(pickTracks);
-  pickTracksRef.current = pickTracks;
-  useEffect(
-    () =>
-      onEvent('remoteTracks', ({ requestId, change }) => {
-        pickTracksRef.current(change).then(
-          () => api.remoteDone(requestId),
-          (err) => api.remoteDone(requestId, errorMessage(err))
-        );
-      }),
-    []
-  );
-
-  // The tracks of what is ready, in the shape the phone shows for what plays.
-  const readyTracks = useMemo<PlayingTracks | undefined>(() => {
-    if (!probeData) return undefined;
-    const streams = (type: string) => probeData.streams.filter((s) => s.codec_type === type);
-    const file = torrentSubs.findIndex(
-      (f) => subtitlesSelection.type === 'external' && f.path === subtitlesSelection.path
-    );
-    return {
-      // Undecided before a screen is picked: nothing is ruled out.
-      deviceType: device?.type ?? 'upnp',
-      audio: streams('audio').map((s) => ({
-        language: s.tags?.language,
-        title: s.tags?.title,
-        channels: s.channels,
-      })),
-      subtitles: streams('subtitle').map((s) => ({
-        language: s.tags?.language,
-        title: s.tags?.title,
-        bitmap: isBitmapSubtitleCodec(s.codec_name),
-      })),
-      externalName: subs?.name,
-      files: torrentSubs.map((f) => ({
-        name: f.name,
-        label: f.label ?? '',
-        folder: f.folder ?? '',
-      })),
-      selected: {
-        audioIndex: audioSelection?.index ?? 0,
-        subtitles:
-          subtitlesSelection.type === 'internal'
-            ? subtitlesSelection.index
-            : file >= 0
-              ? `file:${file}`
-              : subtitlesSelection.type === 'external'
-                ? 'external'
-                : null,
-      },
-      subtitleOffset: 0,
+  useEffect(() => {
+    const answer = (requestId: string, run: () => Promise<string | undefined>) => {
+      run().then(
+        (error) => api.remoteDone(requestId, error),
+        (err) => api.remoteDone(requestId, errorMessage(err))
+      );
     };
-  }, [probeData, torrentSubs, subs, subtitlesSelection, audioSelection, device?.type]);
+    const sameVideo = (videoPath: string): string | undefined =>
+      videoPath === videoPathRef.current ? undefined : 'Another video is ready on the computer now';
+    const offLaunch = onEvent('remoteLaunch', ({ requestId, videoPath, device: target }) =>
+      answer(requestId, async () => sameVideo(videoPath) ?? playRef.current(target))
+    );
+    const offTracks = onEvent('remoteTracks', ({ requestId, videoPath, change }) =>
+      answer(requestId, async () => {
+        const error = sameVideo(videoPath);
+        if (!error) await selectionRef.current.applyChange(change);
+        return error;
+      })
+    );
+    return () => {
+      offLaunch();
+      offTracks();
+    };
+  }, []);
 
   // What the phone remote shows as ready to play.
+  const readyTracks = selection.tracks;
   useEffect(() => {
     void api.setRemoteContext({
       prepared: videoPath ? { videoPath, title, details, tracks: readyTracks } : null,
@@ -665,9 +578,9 @@ export default function Dropper({
                 {hasAudio && (
                   <Section title="Audio">
                     <AudioSelector
-                      video={video}
+                      choices={selection.audioTracks}
                       value={audioSelection}
-                      onChange={setAudioSelection}
+                      onChange={selection.chooseAudio}
                     />
                   </Section>
                 )}
@@ -717,13 +630,16 @@ export default function Dropper({
                   }
                 >
                   <SubtitlesSelector
+                    internal={selection.internal}
                     subFile={subs}
                     bundled={torrentSubs}
-                    onError={setCastError}
-                    video={video}
                     deviceType={device?.type}
                     value={subtitlesSelection}
-                    onChange={setSubtitlesSelection}
+                    fetching={selection.fetching}
+                    onPick={selection.chooseSubtitles}
+                    onPickFile={(file) =>
+                      void selection.pickFile(file).catch((err) => setCastError(errorMessage(err)))
+                    }
                   />
                   {showBurnToggle && (
                     <Tooltip
@@ -814,7 +730,7 @@ export default function Dropper({
             source={syncSource}
             onClose={() => setSyncSource(undefined)}
             onApply={(file) => {
-              setSubs(file);
+              selection.addSubtitles(file);
               setSyncSource(undefined);
               setSearchOpen(false);
             }}

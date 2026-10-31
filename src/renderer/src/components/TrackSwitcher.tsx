@@ -1,16 +1,19 @@
 import { CheckRounded } from '@mui/icons-material';
 import { Button, CircularProgress, Stack, Tooltip, Typography } from '@mui/material';
 import { useState } from 'react';
-import type { PlayingTracks, SubtitleChoice, TrackChange } from '../../../shared/types';
+import type { DeviceType, SubtitleChoice, TrackChange, TrackList } from '../../../shared/types';
 import { audioTrackName, subtitleFileName, subtitleTrackName } from '../labels';
 import { chipSx } from '../theme';
 import SubtitleChoices, { type SubtitleOption } from './SubtitleChoices';
 
 type Props = {
-  tracks: PlayingTracks;
+  tracks: TrackList;
+  // The screen it plays on, or will: a Chromecast can't show image subtitles.
+  deviceType?: DeviceType;
   onChange: (change: TrackChange) => Promise<void>;
-  // False for a video not playing yet (the phone's ready card): nothing to reload.
-  playing?: boolean;
+  // Whether a switch reloads the video on the TV (said under the choices): false for a
+  // video not playing yet (the phone's ready card).
+  reloads?: boolean;
 };
 
 // Audio and subtitles of the video playing. A TV reads both only at load, so a switch
@@ -18,9 +21,11 @@ type Props = {
 // also uses it to pick them for the video ready on the computer.
 export default function TrackSwitcher({
   tracks,
+  deviceType,
   onChange,
-  playing = true,
+  reloads = true,
 }: Props): React.JSX.Element {
+  const chromecast = deviceType === 'chromecast';
   // What is being switched to, while the TV reloads.
   const [pending, setPending] = useState<TrackChange>();
 
@@ -48,11 +53,8 @@ export default function TrackSwitcher({
       label: subtitleTrackName(s, i),
       group: 'In the video',
       // Chromecast plays the file as is, with a text sidecar: no way to show images.
-      disabled: s.bitmap && tracks.deviceType === 'chromecast',
-      hint:
-        s.bitmap && tracks.deviceType === 'chromecast'
-          ? 'Image subtitles can’t be shown on a Chromecast'
-          : undefined,
+      disabled: s.bitmap && chromecast,
+      hint: s.bitmap && chromecast ? 'Image subtitles can’t be shown on a Chromecast' : undefined,
     })),
     ...tracks.files.map((f, i) => ({
       value: `file:${i}` as const,
@@ -92,7 +94,7 @@ export default function TrackSwitcher({
           }}
         />
       </Group>
-      {playing && (
+      {reloads && (
         <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>
           Switching reloads the video on the TV and picks up where it was.
         </Typography>

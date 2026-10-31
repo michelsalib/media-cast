@@ -1,5 +1,6 @@
 import type { FFProbeData } from '../../../main/ffmpeg';
 import { isBitmapSubtitleCodec } from '../../../shared/subtitles';
+import type { DeviceType } from '../../../shared/types';
 import { subtitleTrackName } from '../labels';
 
 export const NO_SUBTITLES: SubtitlesSelection = {
@@ -37,4 +38,36 @@ export function internalSubtitles(probeData: FFProbeData): SubtitlesSelection[] 
 
 export function bundledSelection(f: SubtitlesFile): SubtitlesSelection {
   return { type: 'external', name: f.name, path: f.path, label: f.label };
+}
+
+export function externalSelection(f: SubtitlesFile): SubtitlesSelection {
+  return { type: 'external', name: f.name, path: f.path };
+}
+
+// Chromecast always direct-plays with sidecar WebVTT, so image-based tracks have no
+// path to the screen there.
+export function isSupported(c: SubtitlesSelection, deviceType: DeviceType | undefined): boolean {
+  return !(c.type === 'internal' && c.bitmap && deviceType === 'chromecast');
+}
+
+// What a new video starts with: the added file, else the first track the screen can show.
+export function defaultSubtitles(
+  internal: SubtitlesSelection[],
+  added: SubtitlesFile | undefined,
+  deviceType: DeviceType | undefined
+): SubtitlesSelection {
+  return (
+    (added && externalSelection(added)) ??
+    internal.find((c) => isSupported(c, deviceType)) ??
+    NO_SUBTITLES
+  );
+}
+
+// What main's `load` takes: a file path, a track index, or none.
+export function subtitlesArg(selection: SubtitlesSelection): string | number | undefined {
+  return selection.type === 'external'
+    ? selection.path
+    : selection.type === 'internal'
+      ? selection.index
+      : undefined;
 }

@@ -8,7 +8,6 @@ export interface UpnpDevice extends Device {
   ip: string;
   avTransportControlUrl: string;
   avTransportEventSubUrl: string;
-  renderingControl?: { controlUrl: string; eventSubUrl?: string };
   // Always known for UPnP — narrows Device's optional Sink fields.
   acceptedVideoMimes: readonly string[];
   acceptedWildcardVideoMimes: readonly string[];
@@ -88,7 +87,6 @@ export class UpnpDevicesScanner implements DevicesScanner<UpnpDevice> {
       ip: new URL(location).hostname,
       avTransportControlUrl: desc.avTransportControlUrl,
       avTransportEventSubUrl: desc.avTransportEventSubUrl,
-      renderingControl: desc.renderingControl,
       acceptedVideoMimes: protocolInfo.videoMimes,
       acceptedWildcardVideoMimes: protocolInfo.wildcardVideoMimes,
       expiresAt,

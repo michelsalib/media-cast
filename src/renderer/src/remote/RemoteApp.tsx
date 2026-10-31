@@ -28,7 +28,6 @@ import type { PlayerStatus, PlayingTracks, TorrentStats } from '../../../shared/
 import LiveSubtitles from '../components/LiveSubtitles';
 import { TorrentChip } from '../components/Torrent';
 import TrackSwitcher from '../components/TrackSwitcher';
-import VolumeControl from '../components/VolumeControl';
 import { episodeLabel } from '../labels';
 import { SeekHold } from '../seekHold';
 import { cardSx, DEFAULT_ACCENT, makeTheme, tonalSx } from '../theme';
@@ -221,6 +220,7 @@ export default function RemoteApp(): React.JSX.Element {
     playing,
     duration,
     position: clock.time,
+    statusAt: clock.at,
     onPlay: () => void act(() => remote.play()),
     onPause: () => void act(() => remote.pause()),
     onSeek: seek,
@@ -362,11 +362,6 @@ export default function RemoteApp(): React.JSX.Element {
                     <Forward30Rounded sx={{ fontSize: 32 }} />
                   </IconButton>
                 </Stack>
-                <VolumeControl
-                  volume={status?.volume}
-                  onChange={(change) => act(() => remote.setVolume(change))}
-                  sx={{ mt: 1, pr: 1 }}
-                />
                 <Stack direction="row" sx={{ justifyContent: 'center', mt: 1.5 }}>
                   <Button
                     startIcon={<StopRounded />}
@@ -383,6 +378,7 @@ export default function RemoteApp(): React.JSX.Element {
                   <Typography sx={{ fontWeight: 600 }}>Audio & subtitles</Typography>
                   <TrackSwitcher
                     tracks={tracks}
+                    deviceType={tracks.deviceType}
                     onChange={(change) => act(() => remote.changeTracks(change))}
                   />
                 </Stack>

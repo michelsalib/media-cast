@@ -44,7 +44,7 @@ export default function ReadyCard({
     setError(undefined);
     try {
       // Resolves once the TV has the video; the state push then shows the controls.
-      await remote.launch(chosen.id);
+      await remote.launch(prepared.id, chosen.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -55,7 +55,7 @@ export default function ReadyCard({
   async function pickTracks(change: TrackChange): Promise<void> {
     setError(undefined);
     try {
-      await remote.pickReadyTracks(change);
+      await remote.pickReadyTracks(prepared.id, change);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -102,7 +102,13 @@ export default function ReadyCard({
 
       {tracks && (
         <Stack spacing={1.5} sx={{ px: 1 }}>
-          <TrackSwitcher tracks={tracks} playing={false} onChange={pickTracks} />
+          {/* Image subtitles are ruled out once a Chromecast is the screen picked here. */}
+          <TrackSwitcher
+            tracks={tracks}
+            deviceType={chosen?.type}
+            reloads={false}
+            onChange={pickTracks}
+          />
           {!secondary && tracks.selected.subtitles !== null && (
             <SubtitleSizeChoices scale={subtitleScale} onChange={onSubtitleScale} />
           )}

@@ -1,16 +1,16 @@
 import { readFileSync, writeFileSync } from 'node:fs';
-import { basename, extname, join } from 'node:path';
+import { extname, join } from 'node:path';
 import { app, type BrowserWindow } from 'electron';
 import { checkCompat } from '../shared/compat';
 import type { SubtitleCue } from '../shared/subtitleSearch';
 import { isBitmapSubtitleCodec, SUBTITLE_SCALES } from '../shared/subtitles';
+import { describeTracks } from '../shared/tracks';
 import type {
   NowPlaying,
   PlayerStatus,
   PlayingTracks,
   Renderer,
   TrackChange,
-  Volume,
 } from '../shared/types';
 import { sendEvent } from './api';
 import type { ChromecastDevice } from './chromecast/DevicesScanner';
@@ -82,7 +82,6 @@ export class PlaybackController {
         : new UpnpPlayer({
             avTransportControlUrl: device.avTransportControlUrl,
             avTransportEventSubUrl: device.avTransportEventSubUrl,
-            renderingControl: device.renderingControl,
             targetIp: device.ip,
           });
 
@@ -219,34 +218,15 @@ export class PlaybackController {
     const data = await probe(current.videoPath);
     // A retimed copy is shown as the track it was made from.
     const { source: subs, offset } = this.subtitleTiming(current);
-    const external = this.externalFor(current.videoPath);
-    const files = this.torrents.subtitlesOf(current.videoPath);
-    const file = files.findIndex((f) => f.path === subs);
     return {
+      ...describeTracks({
+        streams: data.streams,
+        files: this.torrents.subtitlesOf(current.videoPath),
+        externalPath: this.externalFor(current.videoPath),
+        subtitles: subs,
+        audioIndex: current.audioIndex,
+      }),
       deviceType: this.currentDevice?.type ?? 'upnp',
-      audio: data.streams
-        .filter((s) => s.codec_type === 'audio')
-        .map((s) => ({ language: s.tags?.language, title: s.tags?.title, channels: s.channels })),
-      subtitles: data.streams
-        .filter((s) => s.codec_type === 'subtitle')
-        .map((s) => ({
-          language: s.tags?.language,
-          title: s.tags?.title,
-          bitmap: isBitmapSubtitleCodec(s.codec_name),
-        })),
-      externalName: external && basename(external),
-      files: files.map(({ path: _, ...f }) => f),
-      selected: {
-        audioIndex: current.audioIndex ?? 0,
-        subtitles:
-          typeof subs === 'number'
-            ? subs
-            : file >= 0
-              ? `file:${file}`
-              : subs !== undefined
-                ? 'external'
-                : null,
-      },
       subtitleOffset: offset,
     };
   }
@@ -509,10 +489,6 @@ export class PlaybackController {
 
   async seek(time: number): Promise<void> {
     await this.renderer?.seek(time);
-  }
-
-  async setVolume(change: Partial<Volume>): Promise<void> {
-    await this.renderer?.setVolume(change);
   }
 
   async close(): Promise<void> {

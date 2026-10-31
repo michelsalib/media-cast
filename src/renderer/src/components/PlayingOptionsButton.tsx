@@ -92,6 +92,7 @@ export default function PlayingOptionsButton({
             {tracks ? (
               <TrackSwitcher
                 tracks={tracks}
+                deviceType={tracks.deviceType}
                 onChange={(change: TrackChange) => run(() => api.changeTracks(change))}
               />
             ) : (

@@ -6,14 +6,6 @@ export interface PlayerStatus {
   duration?: number;
   title?: string;
   transcoded?: boolean;
-  // The TV's own volume; undefined where it can't be read or set.
-  volume?: Volume;
-}
-
-// `level` is 0–1.
-export interface Volume {
-  level: number;
-  muted: boolean;
 }
 
 export type DeviceType = 'chromecast' | 'upnp';
@@ -69,8 +61,6 @@ export interface Renderer {
   onStatus(callback: (status: PlayerStatus) => void): void;
   // Resizes the subtitles of the loaded video; only where the player draws them (Chromecast).
   setSubtitleScale?(scale: number): Promise<void>;
-  // Sets the TV's volume and/or mute; the result comes back in the status.
-  setVolume(change: Partial<Volume>): Promise<void>;
 }
 
 // Main → renderer pushes. Hand-written: unlike `MainApi` there is no
@@ -88,11 +78,12 @@ export interface MainEvents {
   // The phone remote pressed Stop: the window stops as if its own button was used.
   remoteStop: null;
   // The phone remote pressed Play: the window plays what it has ready on `device`, then
-  // reports back with `api.remoteDone(requestId, error?)`.
-  remoteLaunch: { requestId: string; device: Device };
+  // reports back with `api.remoteDone(requestId, error?)`. `videoPath`: the video the
+  // phone was shown, refused if the window has another one ready by now.
+  remoteLaunch: { requestId: string; videoPath: string; device: Device };
   // The phone remote picked other audio or subtitles for what the window has ready: the
   // window applies it as if picked there, then reports back with `api.remoteDone`.
-  remoteTracks: { requestId: string; change: TrackChange };
+  remoteTracks: { requestId: string; videoPath: string; change: TrackChange };
   // The subtitle size changed (from the window or the phone).
   subtitleScale: number;
 }
@@ -101,7 +92,7 @@ export interface MainEvents {
 export interface RemoteContext {
   // `details`: the plain-words summary the window shows (episode, subtitles). `tracks`:
   // what can be picked and what is, once the window has probed the video.
-  prepared: { videoPath: string; title: string; details?: string; tracks?: PlayingTracks } | null;
+  prepared: { videoPath: string; title: string; details?: string; tracks?: TrackList } | null;
   deviceId: string | null;
 }
 
@@ -117,23 +108,27 @@ export interface NowPlaying {
   resizableSubtitles: boolean;
 }
 
-// The tracks of the video playing (or ready to play: see RemoteContext), raw: the window
-// and the phone label them alike.
-export interface PlayingTracks {
-  deviceType: DeviceType;
+// The tracks of a video and those picked, raw: the window and the phone label them alike.
+// Built by `describeTracks` (shared/tracks.ts), for the video ready and the one playing.
+export interface TrackList {
   audio: { language?: string; title?: string; channels?: number }[];
   subtitles: { language?: string; title?: string; bitmap: boolean }[];
-  // The subtitle file loaded with this video, if any (still offered once switched away).
+  // The subtitle file added to this video, if any (still offered once switched away).
   externalName?: string;
   // The subtitle files in the video's torrent (no paths: the phone sees this too).
   files: Omit<TorrentSubtitles, 'path'>[];
   selected: { audioIndex: number; subtitles: SubtitleChoice };
+}
+
+// The tracks of the video playing.
+export interface PlayingTracks extends TrackList {
+  deviceType: DeviceType;
   // Seconds the subtitles playing are shifted from their original timing (0: as is).
   subtitleOffset: number;
 }
 
-// Subtitles while playing: a track index, the added file, a file of the torrent (by index
-// in `PlayingTracks.files`), or none.
+// Picked subtitles: a track index, the added file, a file of the torrent (by index in
+// `TrackList.files`), or none.
 export type SubtitleChoice = number | 'external' | `file:${number}` | null;
 
 // A switch while playing; undefined keeps what plays.

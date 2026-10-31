@@ -12,7 +12,6 @@ import type {
   RemoteContext,
   ThemeSource,
   TrackChange,
-  Volume,
 } from '../shared/types';
 import { appearance, setThemeSource, setTitleBarColors } from './appearance';
 import { getBinaryPaths, getFfmpegVersion, probe, thumbnail } from './ffmpeg';
@@ -93,7 +92,6 @@ export function createMainApi({
     play: () => controller.play(),
     pause: () => controller.pause(),
     seek: (time: number) => controller.seek(time),
-    setVolume: (change: Partial<Volume>) => controller.setVolume(change),
     subtitleScale: () => controller.subtitleScale,
     setSubtitleScale: (scale: number) => controller.setSubtitleScale(scale),
     refresh: (): void => {
