@@ -1,3 +1,7 @@
+import type { FFProbeData } from '../../../main/ffmpeg';
+import { isBitmapSubtitleCodec } from '../../../shared/subtitles';
+import { subtitleTrackName } from '../labels';
+
 export const NO_SUBTITLES: SubtitlesSelection = {
   type: 'no subtitles',
   name: 'No subtitles',
@@ -18,4 +22,19 @@ export interface SubtitlesFile {
   // For the files of a torrent: what sets it apart, and where it is in the torrent.
   label?: string;
   folder?: string;
+}
+
+export function internalSubtitles(probeData: FFProbeData): SubtitlesSelection[] {
+  return probeData.streams
+    .filter((s) => s.codec_type === 'subtitle')
+    .map((s, i) => ({
+      type: 'internal',
+      index: i,
+      name: subtitleTrackName({ ...s.tags }, i),
+      bitmap: isBitmapSubtitleCodec(s.codec_name),
+    }));
+}
+
+export function bundledSelection(f: SubtitlesFile): SubtitlesSelection {
+  return { type: 'external', name: f.name, path: f.path, label: f.label };
 }

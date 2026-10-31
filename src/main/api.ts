@@ -12,6 +12,7 @@ import type {
   RemoteContext,
   ThemeSource,
   TrackChange,
+  Volume,
 } from '../shared/types';
 import { appearance, setThemeSource, setTitleBarColors } from './appearance';
 import { getBinaryPaths, getFfmpegVersion, probe, thumbnail } from './ffmpeg';
@@ -92,6 +93,7 @@ export function createMainApi({
     play: () => controller.play(),
     pause: () => controller.pause(),
     seek: (time: number) => controller.seek(time),
+    setVolume: (change: Partial<Volume>) => controller.setVolume(change),
     subtitleScale: () => controller.subtitleScale,
     setSubtitleScale: (scale: number) => controller.setSubtitleScale(scale),
     refresh: (): void => {
@@ -110,7 +112,7 @@ export function createMainApi({
     retimePlaying: (offset: number) => controller.retime(offset),
     // The window reports what it has ready, and how a phone-started Play went.
     setRemoteContext: (context: RemoteContext): void => hub.setContext(context),
-    remoteLaunchDone: (requestId: string, error?: string): void => hub.launchDone(requestId, error),
+    remoteDone: (requestId: string, error?: string): void => hub.done(requestId, error),
 
     // Online subtitles. Downloads and resyncs land in a cache dir and come back as a
     // path the renderer treats like a dropped sidecar file.

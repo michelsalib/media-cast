@@ -28,10 +28,12 @@ import type { PlayerStatus, PlayingTracks, TorrentStats } from '../../../shared/
 import LiveSubtitles from '../components/LiveSubtitles';
 import { TorrentChip } from '../components/Torrent';
 import TrackSwitcher from '../components/TrackSwitcher';
+import VolumeControl from '../components/VolumeControl';
 import { episodeLabel } from '../labels';
 import { SeekHold } from '../seekHold';
 import { cardSx, DEFAULT_ACCENT, makeTheme, tonalSx } from '../theme';
 import { connectEvents, type RemoteState, remote } from './client';
+import { useMediaSession } from './mediaSession';
 import ReadyCard from './ReadyCard';
 
 // The TV's position as last reported, and when, so the phone can run it forward
@@ -147,6 +149,11 @@ export default function RemoteApp(): React.JSX.Element {
     void act(() => remote.seek(target));
   }
 
+  function changeSubtitleScale(value: number): void {
+    setSubtitleScale(value);
+    void act(() => remote.setSubtitleScale(value));
+  }
+
   async function applyOffset(value: number): Promise<void> {
     try {
       await remote.applyOffset(value);
@@ -202,6 +209,24 @@ export default function RemoteApp(): React.JSX.Element {
     cues.find((c) => time >= c.start + offset && time < c.end + offset);
   const previewLine = preview ? cueAt(previewTime) : undefined;
 
+  useMediaSession({
+    media: nowPlaying
+      ? {
+          title,
+          artist: `On ${nowPlaying.deviceName}`,
+          album: eyebrow,
+          artwork: `artwork?n=${loadCount}`,
+        }
+      : null,
+    playing,
+    duration,
+    position: clock.time,
+    onPlay: () => void act(() => remote.play()),
+    onPause: () => void act(() => remote.pause()),
+    onSeek: seek,
+    onSeekBy: (delta) => seek(tvTime + delta),
+  });
+
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
@@ -233,6 +258,8 @@ export default function RemoteApp(): React.JSX.Element {
               devices={state.devices}
               deviceId={state.deviceId}
               secondary={false}
+              subtitleScale={subtitleScale}
+              onSubtitleScale={changeSubtitleScale}
             />
           )}
 
@@ -335,6 +362,11 @@ export default function RemoteApp(): React.JSX.Element {
                     <Forward30Rounded sx={{ fontSize: 32 }} />
                   </IconButton>
                 </Stack>
+                <VolumeControl
+                  volume={status?.volume}
+                  onChange={(change) => act(() => remote.setVolume(change))}
+                  sx={{ mt: 1, pr: 1 }}
+                />
                 <Stack direction="row" sx={{ justifyContent: 'center', mt: 1.5 }}>
                   <Button
                     startIcon={<StopRounded />}
@@ -367,10 +399,7 @@ export default function RemoteApp(): React.JSX.Element {
                     onOffsetChange={setOffset}
                     onApplyOffset={applyOffset}
                     scale={nowPlaying.resizableSubtitles ? subtitleScale : undefined}
-                    onScaleChange={(value) => {
-                      setSubtitleScale(value);
-                      void act(() => remote.setSubtitleScale(value));
-                    }}
+                    onScaleChange={changeSubtitleScale}
                   />
                 </Stack>
               )}
@@ -465,6 +494,8 @@ export default function RemoteApp(): React.JSX.Element {
                   devices={state.devices}
                   deviceId={state.deviceId}
                   secondary
+                  subtitleScale={subtitleScale}
+                  onSubtitleScale={changeSubtitleScale}
                 />
               )}
             </>

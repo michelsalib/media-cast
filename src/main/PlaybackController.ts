@@ -10,6 +10,7 @@ import type {
   PlayingTracks,
   Renderer,
   TrackChange,
+  Volume,
 } from '../shared/types';
 import { sendEvent } from './api';
 import type { ChromecastDevice } from './chromecast/DevicesScanner';
@@ -81,6 +82,7 @@ export class PlaybackController {
         : new UpnpPlayer({
             avTransportControlUrl: device.avTransportControlUrl,
             avTransportEventSubUrl: device.avTransportEventSubUrl,
+            renderingControl: device.renderingControl,
             targetIp: device.ip,
           });
 
@@ -507,6 +509,10 @@ export class PlaybackController {
 
   async seek(time: number): Promise<void> {
     await this.renderer?.seek(time);
+  }
+
+  async setVolume(change: Partial<Volume>): Promise<void> {
+    await this.renderer?.setVolume(change);
   }
 
   async close(): Promise<void> {

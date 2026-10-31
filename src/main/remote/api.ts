@@ -1,5 +1,5 @@
 import type { BrowserWindow } from 'electron';
-import type { Device, PlayerStatus, TrackChange } from '../../shared/types';
+import type { Device, PlayerStatus, TrackChange, Volume } from '../../shared/types';
 import { sendEvent } from '../api';
 import { appearance } from '../appearance';
 import type { PlaybackController } from '../PlaybackController';
@@ -49,7 +49,7 @@ export function createRemoteApi({ window, controller, preview, hub, devices }: R
         // Hidden while it's the video already playing.
         prepared:
           prepared && prepared.videoPath !== now?.videoPath
-            ? { title: prepared.title, details: prepared.details }
+            ? { title: prepared.title, details: prepared.details, tracks: prepared.tracks }
             : null,
         devices: devices().map(({ id, name, type }) => ({ id, name, type })),
         deviceId: hub.current.deviceId,
@@ -63,9 +63,15 @@ export function createRemoteApi({ window, controller, preview, hub, devices }: R
       if (!hub.current.prepared) throw new Error('Nothing is ready on the computer');
       await hub.launch(device);
     },
+    // Picks audio or subtitles for what the window has ready, as if picked there.
+    pickReadyTracks: async (change: TrackChange): Promise<void> => {
+      if (!hub.current.prepared) throw new Error('Nothing is ready on the computer');
+      await hub.pickTracks(trackChange(change));
+    },
     play: () => controller.play(),
     pause: () => controller.pause(),
     seek: (time: number) => controller.seek(finite(time)),
+    setVolume: (change: Partial<Volume>) => controller.setVolume(volumeChange(change)),
     setSubtitleScale: (scale: number) => controller.setSubtitleScale(finite(scale)),
     // The window owns the connection state, so it does the stopping.
     stop: (): void => sendEvent(window, 'remoteStop', null),
@@ -95,6 +101,12 @@ export type RemoteApi = ReturnType<typeof createRemoteApi>;
 function finite(value: unknown): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error('Not a number');
   return value;
+}
+
+function volumeChange(value: unknown): Partial<Volume> {
+  const { level, muted } = (value ?? {}) as Record<string, unknown>;
+  if (muted !== undefined && typeof muted !== 'boolean') throw new Error('Bad mute');
+  return { level: level === undefined ? undefined : finite(level), muted };
 }
 
 // Only the shapes TrackChange allows: the phone's JSON is untrusted.

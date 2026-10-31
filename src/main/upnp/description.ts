@@ -7,6 +7,8 @@ export interface DeviceDescription {
   avTransportControlUrl: string;
   avTransportEventSubUrl: string;
   connectionManagerControlUrl: string;
+  // RenderingControl (volume), when the renderer has one.
+  renderingControl?: { controlUrl: string; eventSubUrl?: string };
 }
 
 export async function fetchDescription(url: string): Promise<DeviceDescription | undefined> {
@@ -58,6 +60,10 @@ function parseDescription(xml: string, descriptionUrl: string): DeviceDescriptio
     return undefined;
   }
 
+  const rcService = findService(xml, 'urn:schemas-upnp-org:service:RenderingControl:1');
+  const rcControlUrl = rcService && extractTag(rcService, 'controlURL');
+  const rcEventSubUrl = rcService && extractTag(rcService, 'eventSubURL');
+
   const base = new URL(descriptionUrl);
   return {
     friendlyName: friendlyName.trim(),
@@ -65,6 +71,12 @@ function parseDescription(xml: string, descriptionUrl: string): DeviceDescriptio
     avTransportControlUrl: new URL(controlUrl.trim(), base).toString(),
     avTransportEventSubUrl: new URL(eventSubUrl.trim(), base).toString(),
     connectionManagerControlUrl: new URL(cmControlUrl.trim(), base).toString(),
+    renderingControl: rcControlUrl
+      ? {
+          controlUrl: new URL(rcControlUrl.trim(), base).toString(),
+          eventSubUrl: rcEventSubUrl ? new URL(rcEventSubUrl.trim(), base).toString() : undefined,
+        }
+      : undefined,
   };
 }
 

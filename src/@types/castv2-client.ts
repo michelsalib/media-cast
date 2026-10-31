@@ -11,12 +11,14 @@ declare module 'castv2-client' {
     isActiveInput: boolean;
     isStandby: boolean;
     applications?: ApplicationStatus[];
-    volume: {
-      controlType: 'fixed';
-      level: number;
-      muted: boolean;
-      stepInterval: number;
-    };
+    volume: ReceiverVolume;
+  }
+
+  export interface ReceiverVolume {
+    controlType: 'attenuation' | 'fixed' | 'master';
+    level: number;
+    muted: boolean;
+    stepInterval: number;
   }
 
   export interface MediaStatus {
@@ -109,8 +111,12 @@ declare module 'castv2-client' {
     ): void;
     launch<T extends Application>(application: { new (): T }, callback?: Callback<T>): void;
     stop(application: any, callback: Callback<any>): void;
-    setVolume(volume: number, callback: Callback<any>): void;
-    getVolume(callback: Callback<any>): void;
+    // Either `{ level }` or `{ muted }`.
+    setVolume(
+      volume: { level?: number; muted?: boolean },
+      callback: Callback<ReceiverVolume>
+    ): void;
+    getVolume(callback: Callback<ReceiverVolume>): void;
   }
 
   type ApplicationEventMap = {

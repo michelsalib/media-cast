@@ -9,11 +9,18 @@ import SubtitleChoices, { type SubtitleOption } from './SubtitleChoices';
 type Props = {
   tracks: PlayingTracks;
   onChange: (change: TrackChange) => Promise<void>;
+  // False for a video not playing yet (the phone's ready card): nothing to reload.
+  playing?: boolean;
 };
 
 // Audio and subtitles of the video playing. A TV reads both only at load, so a switch
-// reloads the video where it was. The same in the window and on the phone remote.
-export default function TrackSwitcher({ tracks, onChange }: Props): React.JSX.Element {
+// reloads the video where it was. The same in the window and on the phone remote, which
+// also uses it to pick them for the video ready on the computer.
+export default function TrackSwitcher({
+  tracks,
+  onChange,
+  playing = true,
+}: Props): React.JSX.Element {
   // What is being switched to, while the TV reloads.
   const [pending, setPending] = useState<TrackChange>();
 
@@ -85,9 +92,11 @@ export default function TrackSwitcher({ tracks, onChange }: Props): React.JSX.El
           }}
         />
       </Group>
-      <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>
-        Switching reloads the video on the TV and picks up where it was.
-      </Typography>
+      {playing && (
+        <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>
+          Switching reloads the video on the TV and picks up where it was.
+        </Typography>
+      )}
     </Stack>
   );
 }

@@ -1,6 +1,18 @@
 import { promisify } from 'node:util';
-import { Client, DefaultMediaReceiver, type Media, type MediaStatus } from 'castv2-client';
-import type { LoadVideoOptions, PlayerState, PlayerStatus, Renderer } from '../../shared/types';
+import {
+  Client,
+  DefaultMediaReceiver,
+  type Media,
+  type MediaStatus,
+  type ReceiverVolume,
+} from 'castv2-client';
+import type {
+  LoadVideoOptions,
+  PlayerState,
+  PlayerStatus,
+  Renderer,
+  Volume,
+} from '../../shared/types';
 
 // https://github.com/thibauts/node-castv2-client/wiki/How-to-use-subtitles-with-the-DefaultMediaReceiver-app#subtitle-styling
 const TEXT_TRACK_STYLE: NonNullable<Media['textTrackStyle']> = {
@@ -16,6 +28,7 @@ export class CastPlayer implements Renderer {
   private player?: DefaultMediaReceiver;
   private statusCallback?: (status: PlayerStatus) => void;
   private lastMedia?: Media;
+  private volume?: Volume;
 
   constructor(private readonly host: string) {
     // castv2-client re-emits socket errors and the heartbeat 'Device timeout' as 'error'
@@ -32,6 +45,13 @@ export class CastPlayer implements Renderer {
 
   async connect(): Promise<void> {
     await promisify(this.client.connect).bind(this.client)(this.host);
+    // Receiver status: the volume, also when changed from the TV remote or another sender.
+    this.client.on('status', (s) => void this.setReceiverVolume(s.volume));
+    await this.setReceiverVolume(
+      await promisify(this.client.getVolume)
+        .bind(this.client)()
+        .catch(() => undefined)
+    );
     const player = await promisify(this.client.launch).bind(this.client)(DefaultMediaReceiver);
     player.on('status', (s) => this.emit(s));
     // Receiver app closed from elsewhere (phone, TV remote, another sender).
@@ -57,6 +77,7 @@ export class CastPlayer implements Renderer {
     }
     this.player = undefined;
     this.statusCallback?.({
+      volume: this.volume,
       playerState: 'IDLE',
       currentTime: 0,
       duration: this.lastMedia?.duration,
@@ -118,6 +139,33 @@ export class CastPlayer implements Renderer {
     });
   }
 
+  // The receiver's volume (the TV's, over HDMI-CEC), not the media's. It takes a level or
+  // a mute in one request, not both.
+  async setVolume({ level, muted }: Partial<Volume>): Promise<void> {
+    const set = promisify(this.client.setVolume).bind(this.client);
+    // Resolved once the status carrying it is out, so a slider doesn't flick back.
+    if (level !== undefined) {
+      await this.setReceiverVolume(await set({ level: Math.min(1, Math.max(0, level)) }));
+    }
+    if (muted !== undefined) {
+      await this.setReceiverVolume(await set({ muted }));
+    }
+  }
+
+  // A fixed volume can't be changed from here: reported as unknown, so no control shows.
+  private async setReceiverVolume(volume: ReceiverVolume | undefined): Promise<void> {
+    const next =
+      volume && volume.controlType !== 'fixed'
+        ? { level: volume.level, muted: volume.muted }
+        : undefined;
+    if (next?.level === this.volume?.level && next?.muted === this.volume?.muted) {
+      return;
+    }
+    this.volume = next;
+    // A fresh media status carries it, at the right position.
+    await this.getStatus().catch(() => {});
+  }
+
   async pause(): Promise<void> {
     if (!this.player) {
       throw new Error('Player not ready');
@@ -153,6 +201,7 @@ export class CastPlayer implements Renderer {
     }
     const media = status.media ?? this.lastMedia;
     this.statusCallback?.({
+      volume: this.volume,
       playerState: status.playerState as PlayerState,
       currentTime: status.currentTime,
       duration: media?.duration,

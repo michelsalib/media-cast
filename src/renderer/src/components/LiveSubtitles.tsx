@@ -47,25 +47,7 @@ export default function LiveSubtitles({
     <Stack spacing={1.5}>
       <SubtitleLine text={line?.text} />
       {scale !== undefined && onScaleChange && (
-        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-          <Typography sx={{ fontSize: 13, color: 'text.secondary', mr: 0.5 }}>
-            Size on the TV
-          </Typography>
-          {SUBTITLE_SCALES.map((s) => (
-            <Button
-              key={s.value}
-              aria-label={s.label}
-              title={s.label}
-              onClick={() => onScaleChange(s.value)}
-              sx={{ ...(chipSx(s.value === scale) as object), ...stepSx }}
-            >
-              {/* The letter grows with the size it stands for. */}
-              <Box component="span" sx={{ fontSize: 11 * s.value + 3 }}>
-                A
-              </Box>
-            </Button>
-          ))}
-        </Stack>
+        <SubtitleSizeChoices scale={scale} onChange={onScaleChange} />
       )}
       <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>
         Lines appear here as the TV reaches them. Out of sync? Shift them until they match what you
@@ -157,6 +139,37 @@ function round(value: number): number {
 
 // Five controls in a row on a narrow phone: share the width.
 const stepSx = { flex: 1, minWidth: 0, px: 0 };
+
+// The subtitle size as a row of growing letters; also on the phone's ready card.
+export function SubtitleSizeChoices({
+  scale,
+  onChange,
+}: {
+  scale: number;
+  onChange: (scale: number) => void;
+}): React.JSX.Element {
+  return (
+    <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+      <Typography sx={{ fontSize: 13, color: 'text.secondary', mr: 0.5 }}>
+        Size on the TV
+      </Typography>
+      {SUBTITLE_SCALES.map((s) => (
+        <Button
+          key={s.value}
+          aria-label={s.label}
+          title={s.label}
+          onClick={() => onChange(s.value)}
+          sx={{ ...(chipSx(s.value === scale) as object), ...stepSx }}
+        >
+          {/* The letter grows with the size it stands for. */}
+          <Box component="span" sx={{ fontSize: 11 * s.value + 3 }}>
+            A
+          </Box>
+        </Button>
+      ))}
+    </Stack>
+  );
+}
 
 // "1.5s later", "0.3s earlier", "the original timing".
 function timingLabel(offset: number): string {

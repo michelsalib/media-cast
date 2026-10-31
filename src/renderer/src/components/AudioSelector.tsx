@@ -3,18 +3,18 @@ import { Button, Stack } from '@mui/material';
 import { useEffect, useState } from 'react';
 import type { VideoSource } from '../../../shared/types';
 import { api } from '../ipc';
-import { audioTrackName } from '../labels';
 import { chipSx } from '../theme';
-import type { AudioSelection } from './AudioSelection';
+import { type AudioSelection, audioChoices } from './AudioSelection';
 
 type Props = {
   video?: VideoSource;
-  onChange?: (selection: AudioSelection | undefined) => void;
+  // Owned by the caller (the phone remote can pick too); reset to the first track per video.
+  value?: AudioSelection;
+  onChange: (selection: AudioSelection | undefined) => void;
 };
 
-export default function AudioSelector({ video, onChange }: Props): React.JSX.Element | null {
+export default function AudioSelector({ video, value, onChange }: Props): React.JSX.Element | null {
   const [choices, setChoices] = useState<AudioSelection[]>([]);
-  const [choice, setChoice] = useState<AudioSelection | undefined>();
 
   useEffect(() => {
     let cancelled = false;
@@ -22,26 +22,17 @@ export default function AudioSelector({ video, onChange }: Props): React.JSX.Ele
     async function compute(): Promise<void> {
       if (!video) {
         setChoices([]);
-        setChoice(undefined);
+        onChange(undefined);
         return;
       }
 
-      const probeData = await api.probe(video.path);
-      const audio = probeData.streams
-        .filter((s) => s.codec_type === 'audio')
-        .map(
-          (s, i): AudioSelection => ({
-            index: i,
-            name: audioTrackName({ ...s.tags, channels: s.channels }, i),
-          })
-        );
-
+      const audio = audioChoices(await api.probe(video.path));
       if (cancelled) {
         return;
       }
 
       setChoices(audio);
-      setChoice(audio[0]);
+      onChange(audio[0]);
     }
 
     compute();
@@ -49,11 +40,7 @@ export default function AudioSelector({ video, onChange }: Props): React.JSX.Ele
     return () => {
       cancelled = true;
     };
-  }, [video]);
-
-  useEffect(() => {
-    onChange?.(choice);
-  }, [choice, onChange]);
+  }, [video, onChange]);
 
   if (choices.length === 0) {
     return null;
@@ -62,12 +49,12 @@ export default function AudioSelector({ video, onChange }: Props): React.JSX.Ele
   return (
     <Stack direction="row" useFlexGap sx={{ gap: 1, flexWrap: 'wrap' }}>
       {choices.map((c) => {
-        const selected = c.index === choice?.index;
+        const selected = c.index === value?.index;
         return (
           <Button
             key={c.index}
             aria-pressed={selected}
-            onClick={() => setChoice(c)}
+            onClick={() => onChange(c)}
             sx={chipSx(selected)}
             startIcon={selected ? <CheckRounded /> : undefined}
           >

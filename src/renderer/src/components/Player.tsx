@@ -10,6 +10,7 @@ import { Artwork } from './Artwork';
 import PlayingOptionsButton from './PlayingOptionsButton';
 import PlayPause from './PlayPauseSeek';
 import RemoteButton from './RemoteButton';
+import VolumeControl from './VolumeControl';
 
 type Props = {
   status: PlayerStatus;
@@ -137,6 +138,11 @@ export default function Player({
             {title}
           </Typography>
           {details && <Typography sx={{ color: 'text.secondary' }}>{details}</Typography>}
+          <VolumeControl
+            volume={status.volume}
+            onChange={(change) => api.setVolume(change)}
+            sx={{ maxWidth: 280, pt: 1, ml: -1 }}
+          />
         </Stack>
       </Stack>
 

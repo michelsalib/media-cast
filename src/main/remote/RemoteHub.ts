@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { BrowserWindow } from 'electron';
-import type { Device, RemoteContext } from '../../shared/types';
+import type { Device, MainEvents, RemoteContext, TrackChange } from '../../shared/types';
 import { sendEvent } from '../api';
 
 // Probing, extracting subtitles and a slow TV can make a load take a while; a torrent
@@ -9,11 +9,11 @@ const LAUNCH_TIMEOUT_MS = 180_000;
 
 // Between the window and the phone remote. The window owns what is ready to play (video,
 // subtitles, audio, burn-in) and the connection state, so it reports its context here and
-// a phone's Play is handed back to it to run exactly like its own Play button.
+// a phone's Play or track pick is handed back to it to run exactly like its own.
 export class RemoteHub {
   private context: RemoteContext = { prepared: null, deviceId: null };
   private readonly listeners = new Set<() => void>();
-  private readonly launches = new Map<
+  private readonly requests = new Map<
     string,
     { resolve: () => void; reject: (err: Error) => void; timer: NodeJS.Timeout }
   >();
@@ -34,23 +34,36 @@ export class RemoteHub {
   }
 
   launch(device: Device): Promise<void> {
+    return this.request('remoteLaunch', (requestId) => ({ requestId, device }));
+  }
+
+  // Another audio or subtitle pick for what is ready (not for what plays).
+  pickTracks(change: TrackChange): Promise<void> {
+    return this.request('remoteTracks', (requestId) => ({ requestId, change }));
+  }
+
+  // The window's answer to a request.
+  done(requestId: string, error?: string): void {
+    const request = this.requests.get(requestId);
+    if (!request) return;
+    this.requests.delete(requestId);
+    clearTimeout(request.timer);
+    if (error) request.reject(new Error(error));
+    else request.resolve();
+  }
+
+  private request<K extends 'remoteLaunch' | 'remoteTracks'>(
+    channel: K,
+    payload: (requestId: string) => MainEvents[K]
+  ): Promise<void> {
     const requestId = randomUUID();
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
-        this.launches.delete(requestId);
+        this.requests.delete(requestId);
         reject(new Error('The computer didn’t answer'));
       }, LAUNCH_TIMEOUT_MS);
-      this.launches.set(requestId, { resolve, reject, timer });
-      sendEvent(this.window, 'remoteLaunch', { requestId, device });
+      this.requests.set(requestId, { resolve, reject, timer });
+      sendEvent(this.window, channel, payload(requestId));
     });
-  }
-
-  launchDone(requestId: string, error?: string): void {
-    const launch = this.launches.get(requestId);
-    if (!launch) return;
-    this.launches.delete(requestId);
-    clearTimeout(launch.timer);
-    if (error) launch.reject(new Error(error));
-    else launch.resolve();
   }
 }

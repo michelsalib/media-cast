@@ -26,11 +26,14 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { FFProbeData } from '../../../main/ffmpeg';
 import { type CompatReport, checkCompat } from '../../../shared/compat';
 import { VIDEO_EXTENSIONS } from '../../../shared/media';
+import { isBitmapSubtitleCodec } from '../../../shared/subtitles';
 import type {
   Device,
   PlayerStatus,
+  PlayingTracks,
   TorrentContents,
   TorrentStats,
+  TrackChange,
   VideoSource,
 } from '../../../shared/types';
 import type { Connection } from '../App';
@@ -38,15 +41,21 @@ import { api, errorMessage, onEvent, pathFor } from '../ipc';
 import { episodeLabel, resolutionLabel, runtimeLabel, subtitleFileName } from '../labels';
 import { cardSx, linkSx, tonalSx } from '../theme';
 import { Artwork, useObjectUrl } from './Artwork';
-import type { AudioSelection } from './AudioSelection';
+import { type AudioSelection, audioChoices } from './AudioSelection';
 import AudioSelector from './AudioSelector';
 import Player from './Player';
 import RemoteButton from './RemoteButton';
 import SubtitleSearchDialog from './SubtitleSearchDialog';
 import SubtitleSizeButton from './SubtitleSizeButton';
 import SubtitleSyncDialog, { type SyncSource } from './SubtitleSyncDialog';
-import { NO_SUBTITLES, type SubtitlesFile, type SubtitlesSelection } from './SubtitlesSelection';
-import SubtitlesSelector from './SubtitlesSelector';
+import {
+  bundledSelection,
+  internalSubtitles,
+  NO_SUBTITLES,
+  type SubtitlesFile,
+  type SubtitlesSelection,
+} from './SubtitlesSelection';
+import SubtitlesSelector, { isSupported } from './SubtitlesSelector';
 import { TorrentChip, TorrentPicker } from './Torrent';
 import VideoInfoButton from './VideoInfoButton';
 
@@ -408,18 +417,100 @@ export default function Dropper({
   useEffect(
     () =>
       onEvent('remoteLaunch', ({ requestId, device: target }) => {
-        void playRef.current(target).then((error) => api.remoteLaunchDone(requestId, error));
+        void playRef.current(target).then((error) => api.remoteDone(requestId, error));
       }),
     []
   );
 
+  // The phone remote's audio/subtitle pick for what is ready, applied as if picked here.
+  async function pickTracks(change: TrackChange): Promise<void> {
+    if (!probeData) throw new Error('The video is still being read');
+    if (change.audioIndex !== undefined) {
+      const audio = audioChoices(probeData)[change.audioIndex];
+      if (!audio) throw new Error('Unknown audio track');
+      setAudioSelection(audio);
+    }
+    const choice = change.subtitles;
+    if (choice === null) {
+      setSubtitlesSelection(NO_SUBTITLES);
+    } else if (choice === 'external') {
+      if (!subs) throw new Error('No subtitle file was added to this video');
+      setSubtitlesSelection({ type: 'external', name: subs.name, path: subs.path });
+    } else if (typeof choice === 'number') {
+      const track = internalSubtitles(probeData)[choice];
+      if (!track) throw new Error('Unknown subtitle track');
+      if (!isSupported(track, device?.type)) {
+        throw new Error('Image subtitles can’t be shown on a Chromecast');
+      }
+      setSubtitlesSelection(track);
+    } else if (typeof choice === 'string') {
+      const file = torrentSubs[Number(choice.slice(5))];
+      if (!file) throw new Error('Unknown subtitle file');
+      await api.fetchTorrentSubtitles(file.path);
+      setSubtitlesSelection(bundledSelection(file));
+    }
+  }
+  const pickTracksRef = useRef(pickTracks);
+  pickTracksRef.current = pickTracks;
+  useEffect(
+    () =>
+      onEvent('remoteTracks', ({ requestId, change }) => {
+        pickTracksRef.current(change).then(
+          () => api.remoteDone(requestId),
+          (err) => api.remoteDone(requestId, errorMessage(err))
+        );
+      }),
+    []
+  );
+
+  // The tracks of what is ready, in the shape the phone shows for what plays.
+  const readyTracks = useMemo<PlayingTracks | undefined>(() => {
+    if (!probeData) return undefined;
+    const streams = (type: string) => probeData.streams.filter((s) => s.codec_type === type);
+    const file = torrentSubs.findIndex(
+      (f) => subtitlesSelection.type === 'external' && f.path === subtitlesSelection.path
+    );
+    return {
+      // Undecided before a screen is picked: nothing is ruled out.
+      deviceType: device?.type ?? 'upnp',
+      audio: streams('audio').map((s) => ({
+        language: s.tags?.language,
+        title: s.tags?.title,
+        channels: s.channels,
+      })),
+      subtitles: streams('subtitle').map((s) => ({
+        language: s.tags?.language,
+        title: s.tags?.title,
+        bitmap: isBitmapSubtitleCodec(s.codec_name),
+      })),
+      externalName: subs?.name,
+      files: torrentSubs.map((f) => ({
+        name: f.name,
+        label: f.label ?? '',
+        folder: f.folder ?? '',
+      })),
+      selected: {
+        audioIndex: audioSelection?.index ?? 0,
+        subtitles:
+          subtitlesSelection.type === 'internal'
+            ? subtitlesSelection.index
+            : file >= 0
+              ? `file:${file}`
+              : subtitlesSelection.type === 'external'
+                ? 'external'
+                : null,
+      },
+      subtitleOffset: 0,
+    };
+  }, [probeData, torrentSubs, subs, subtitlesSelection, audioSelection, device?.type]);
+
   // What the phone remote shows as ready to play.
   useEffect(() => {
     void api.setRemoteContext({
-      prepared: videoPath ? { videoPath, title, details } : null,
+      prepared: videoPath ? { videoPath, title, details, tracks: readyTracks } : null,
       deviceId: device?.id ?? null,
     });
-  }, [videoPath, title, details, device?.id]);
+  }, [videoPath, title, details, readyTracks, device?.id]);
 
   return (
     <Box
@@ -573,7 +664,11 @@ export default function Dropper({
               >
                 {hasAudio && (
                   <Section title="Audio">
-                    <AudioSelector video={video} onChange={setAudioSelection} />
+                    <AudioSelector
+                      video={video}
+                      value={audioSelection}
+                      onChange={setAudioSelection}
+                    />
                   </Section>
                 )}
                 <Section
@@ -627,6 +722,7 @@ export default function Dropper({
                     onError={setCastError}
                     video={video}
                     deviceType={device?.type}
+                    value={subtitlesSelection}
                     onChange={setSubtitlesSelection}
                   />
                   {showBurnToggle && (

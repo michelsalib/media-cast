@@ -6,6 +6,14 @@ export interface PlayerStatus {
   duration?: number;
   title?: string;
   transcoded?: boolean;
+  // The TV's own volume; undefined where it can't be read or set.
+  volume?: Volume;
+}
+
+// `level` is 0–1.
+export interface Volume {
+  level: number;
+  muted: boolean;
 }
 
 export type DeviceType = 'chromecast' | 'upnp';
@@ -61,6 +69,8 @@ export interface Renderer {
   onStatus(callback: (status: PlayerStatus) => void): void;
   // Resizes the subtitles of the loaded video; only where the player draws them (Chromecast).
   setSubtitleScale?(scale: number): Promise<void>;
+  // Sets the TV's volume and/or mute; the result comes back in the status.
+  setVolume(change: Partial<Volume>): Promise<void>;
 }
 
 // Main → renderer pushes. Hand-written: unlike `MainApi` there is no
@@ -78,16 +88,20 @@ export interface MainEvents {
   // The phone remote pressed Stop: the window stops as if its own button was used.
   remoteStop: null;
   // The phone remote pressed Play: the window plays what it has ready on `device`, then
-  // reports back with `api.remoteLaunchDone(requestId, error?)`.
+  // reports back with `api.remoteDone(requestId, error?)`.
   remoteLaunch: { requestId: string; device: Device };
+  // The phone remote picked other audio or subtitles for what the window has ready: the
+  // window applies it as if picked there, then reports back with `api.remoteDone`.
+  remoteTracks: { requestId: string; change: TrackChange };
   // The subtitle size changed (from the window or the phone).
   subtitleScale: number;
 }
 
 // What the window has ready to play and the screen picked, shown on the phone remote.
 export interface RemoteContext {
-  // `details`: the plain-words summary the window shows (episode, subtitles).
-  prepared: { videoPath: string; title: string; details?: string } | null;
+  // `details`: the plain-words summary the window shows (episode, subtitles). `tracks`:
+  // what can be picked and what is, once the window has probed the video.
+  prepared: { videoPath: string; title: string; details?: string; tracks?: PlayingTracks } | null;
   deviceId: string | null;
 }
 
@@ -103,7 +117,8 @@ export interface NowPlaying {
   resizableSubtitles: boolean;
 }
 
-// The tracks of the video playing, raw: the window and the phone label them alike.
+// The tracks of the video playing (or ready to play: see RemoteContext), raw: the window
+// and the phone label them alike.
 export interface PlayingTracks {
   deviceType: DeviceType;
   audio: { language?: string; title?: string; channels?: number }[];

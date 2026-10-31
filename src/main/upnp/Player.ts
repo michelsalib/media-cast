@@ -1,4 +1,10 @@
-import type { LoadVideoOptions, PlayerState, PlayerStatus, Renderer } from '../../shared/types';
+import type {
+  LoadVideoOptions,
+  PlayerState,
+  PlayerStatus,
+  Renderer,
+  Volume,
+} from '../../shared/types';
 import { DIRECT_PLAY_FEATURES, TRANSCODED_FEATURES } from './dlna';
 import { UpnpEventing } from './eventing';
 import { soapCall } from './soap';
@@ -7,20 +13,31 @@ import { escapeXml, extractAttr, extractTag, unescapeXml } from './xml';
 export interface UpnpPlayerInfo {
   avTransportControlUrl: string;
   avTransportEventSubUrl: string;
+  renderingControl?: { controlUrl: string; eventSubUrl?: string };
   targetIp: string;
 }
 
 const STATE_EVENT_STALE_MS = 10_000;
+const VOLUME_POLL_MS = 5_000;
+const RENDERING_CONTROL = 'urn:schemas-upnp-org:service:RenderingControl:1';
+// The spec leaves the range to the renderer (its SCPD); TVs use 0–100.
+const MAX_VOLUME = 100;
 
 export class UpnpPlayer implements Renderer {
   private readonly controlUrl: string;
   private readonly eventing: UpnpEventing;
+  private readonly volumeUrl?: string;
+  private readonly volumeEventing?: UpnpEventing;
   private statusCallback?: (status: PlayerStatus) => void;
   private currentTitle?: string;
   private duration?: number;
   private currentTime = 0;
   private playerState: PlayerState = 'IDLE';
   private lastStateEventAt = 0;
+  private volume?: Volume;
+  private volumePolledAt = 0;
+  // RenderingControl events carry the volume: no need to poll it.
+  private volumeEvented = false;
 
   constructor(info: UpnpPlayerInfo) {
     this.controlUrl = info.avTransportControlUrl;
@@ -29,6 +46,15 @@ export class UpnpPlayer implements Renderer {
       targetIp: info.targetIp,
       onEvent: (xml) => this.handleEvent(xml),
     });
+    this.volumeUrl = info.renderingControl?.controlUrl;
+    const volumeEventSubUrl = info.renderingControl?.eventSubUrl;
+    if (volumeEventSubUrl) {
+      this.volumeEventing = new UpnpEventing({
+        eventSubUrl: volumeEventSubUrl,
+        targetIp: info.targetIp,
+        onEvent: (xml) => this.handleVolumeEvent(xml),
+      });
+    }
   }
 
   onStatus(callback: (status: PlayerStatus) => void): void {
@@ -37,6 +63,13 @@ export class UpnpPlayer implements Renderer {
 
   async connect(): Promise<void> {
     await this.eventing.start();
+    if (this.volumeUrl) {
+      // Volume is a nicety: a renderer that won't tell it just shows no control.
+      await this.readVolume().catch(() => {});
+      await this.volumeEventing
+        ?.start()
+        .catch((err) => console.warn('[upnp] RenderingControl subscription failed:', err));
+    }
   }
 
   async close(): Promise<void> {
@@ -47,6 +80,7 @@ export class UpnpPlayer implements Renderer {
     // TV is rebooted. Stop alone leaves the title/last frame on screen, which is the
     // lesser evil; the next load replaces it anyway.
     await this.eventing.stop();
+    await this.volumeEventing?.stop();
   }
 
   async loadVideo({
@@ -177,14 +211,93 @@ export class UpnpPlayer implements Renderer {
         this.playerState = mapTransportState(extractTag(transportXml, 'CurrentTransportState'));
       }
 
+      // Same for the volume, changed with the TV's own remote: polled, slower, only on
+      // renderers that don't event it.
+      if (
+        this.volumeUrl &&
+        !this.volumeEvented &&
+        Date.now() - this.volumePolledAt > VOLUME_POLL_MS
+      ) {
+        await this.readVolume();
+      }
+
       this.emit();
     } catch {
       // Renderer is mid-operation or unreachable — leave state as-is.
     }
   }
 
+  async setVolume({ level, muted }: Partial<Volume>): Promise<void> {
+    if (!this.volumeUrl) {
+      throw new Error('This TV doesn’t let its volume be changed');
+    }
+    if (level !== undefined) {
+      const desired = Math.round(Math.min(1, Math.max(0, level)) * MAX_VOLUME);
+      await soapCall(
+        this.volumeUrl,
+        'SetVolume',
+        { InstanceID: '0', Channel: 'Master', DesiredVolume: String(desired) },
+        RENDERING_CONTROL
+      );
+      this.volume = { level: desired / MAX_VOLUME, muted: this.volume?.muted ?? false };
+    }
+    if (muted !== undefined) {
+      await soapCall(
+        this.volumeUrl,
+        'SetMute',
+        { InstanceID: '0', Channel: 'Master', DesiredMute: muted ? '1' : '0' },
+        RENDERING_CONTROL
+      );
+      this.volume = { level: this.volume?.level ?? 0, muted };
+    }
+    this.emit();
+  }
+
+  private async readVolume(): Promise<void> {
+    if (!this.volumeUrl) {
+      return;
+    }
+    this.volumePolledAt = Date.now();
+    const args = { InstanceID: '0', Channel: 'Master' };
+    const volumeXml = await soapCall(this.volumeUrl, 'GetVolume', args, RENDERING_CONTROL, {
+      quiet: true,
+    });
+    const level = Number(extractTag(volumeXml, 'CurrentVolume'));
+    if (!Number.isFinite(level)) {
+      return;
+    }
+    // Mute is optional in the spec.
+    const muteXml = await soapCall(this.volumeUrl, 'GetMute', args, RENDERING_CONTROL, {
+      quiet: true,
+    }).catch(() => undefined);
+    this.volume = {
+      level: Math.min(1, level / MAX_VOLUME),
+      muted: isTrue(muteXml && extractTag(muteXml, 'CurrentMute')),
+    };
+  }
+
+  private handleVolumeEvent(xml: string): void {
+    const lastChangeRaw = extractTag(xml, 'LastChange');
+    if (!lastChangeRaw) {
+      return;
+    }
+    const inner = unescapeXml(lastChangeRaw);
+    const level = Number(masterValue(inner, 'Volume'));
+    const mute = masterValue(inner, 'Mute');
+    if (!Number.isFinite(level) && mute === undefined) {
+      return;
+    }
+    this.volumeEvented = true;
+    this.volume = {
+      level: Number.isFinite(level) ? Math.min(1, level / MAX_VOLUME) : (this.volume?.level ?? 0),
+      muted: mute !== undefined ? isTrue(mute) : (this.volume?.muted ?? false),
+    };
+    this.emit();
+  }
+
   private emit(): void {
     this.statusCallback?.({
+      volume: this.volume,
       playerState: this.playerState,
       currentTime: this.currentTime,
       duration: this.duration,
@@ -225,6 +338,22 @@ export class UpnpPlayer implements Renderer {
 
     this.emit();
   }
+}
+
+// The `val` of the Master channel's `tag` in a RenderingControl LastChange (Volume and
+// Mute come once per channel: Master, LF, RF…).
+function masterValue(xml: string, tag: string): string | undefined {
+  for (const [element] of xml.matchAll(new RegExp(`<(?:[\\w-]+:)?${tag}\\b[^>]*>`, 'gi'))) {
+    const channel = extractAttr(element, tag, 'channel');
+    if (channel === undefined || channel === 'Master') {
+      return extractAttr(element, tag, 'val');
+    }
+  }
+  return undefined;
+}
+
+function isTrue(value: string | undefined): boolean {
+  return value?.trim() === '1' || value?.trim().toLowerCase() === 'true';
 }
 
 function secondsToHms(seconds: number): string {

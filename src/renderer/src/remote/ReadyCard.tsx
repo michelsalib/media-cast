@@ -1,6 +1,9 @@
 import { Cast, PlayArrowRounded, Tv } from '@mui/icons-material';
 import { Alert, Box, Button, CircularProgress, Stack, Typography } from '@mui/material';
 import { useState } from 'react';
+import type { TrackChange } from '../../../shared/types';
+import { SubtitleSizeChoices } from '../components/LiveSubtitles';
+import TrackSwitcher from '../components/TrackSwitcher';
 import { cardSx, chipSx } from '../theme';
 import { type RemoteState, remote } from './client';
 
@@ -11,15 +14,21 @@ type Props = {
   deviceId: string | null;
   // Something else is playing: a smaller card under the controls.
   secondary: boolean;
+  // The subtitle size, shared with what plays (so not repeated on the secondary card).
+  subtitleScale: number;
+  onSubtitleScale: (scale: number) => void;
 };
 
-// What the window has ready (video and the subtitles/audio chosen there), the screens to
-// play it on, and Play. Choosing what to play stays on the computer.
+// What the window has ready, its audio and subtitles (picked here or there, the window
+// keeps them), the screens to play it on, and Play. Choosing the video, adding subtitle
+// files and finding them online stay on the computer.
 export default function ReadyCard({
   prepared,
   devices,
   deviceId,
   secondary,
+  subtitleScale,
+  onSubtitleScale,
 }: Props): React.JSX.Element {
   const [pick, setPick] = useState<string>();
   const [launching, setLaunching] = useState(false);
@@ -42,6 +51,17 @@ export default function ReadyCard({
       setLaunching(false);
     }
   }
+
+  async function pickTracks(change: TrackChange): Promise<void> {
+    setError(undefined);
+    try {
+      await remote.pickReadyTracks(change);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  const tracks = prepared.tracks;
 
   return (
     <Stack spacing={1.5} sx={{ ...cardSx, p: 1.5, borderRadius: '28px' }}>
@@ -79,6 +99,15 @@ export default function ReadyCard({
           )}
         </Stack>
       </Stack>
+
+      {tracks && (
+        <Stack spacing={1.5} sx={{ px: 1 }}>
+          <TrackSwitcher tracks={tracks} playing={false} onChange={pickTracks} />
+          {!secondary && tracks.selected.subtitles !== null && (
+            <SubtitleSizeChoices scale={subtitleScale} onChange={onSubtitleScale} />
+          )}
+        </Stack>
+      )}
 
       <Stack spacing={1} sx={{ px: 1 }}>
         <Typography sx={{ fontSize: 13, fontWeight: 500, color: 'text.secondary' }}>
