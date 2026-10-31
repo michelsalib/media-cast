@@ -1,8 +1,16 @@
-import { basename, extname } from 'node:path';
-import type { BrowserWindow } from 'electron';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { basename, extname, join } from 'node:path';
+import { app, type BrowserWindow } from 'electron';
 import { checkCompat } from '../shared/compat';
-import { isBitmapSubtitleCodec } from '../shared/subtitles';
-import type { Renderer } from '../shared/types';
+import type { SubtitleCue } from '../shared/subtitleSearch';
+import { isBitmapSubtitleCodec, SUBTITLE_SCALES } from '../shared/subtitles';
+import type {
+  NowPlaying,
+  PlayerStatus,
+  PlayingTracks,
+  Renderer,
+  TrackChange,
+} from '../shared/types';
 import { sendEvent } from './api';
 import type { ChromecastDevice } from './chromecast/DevicesScanner';
 import { CastPlayer } from './chromecast/Player';
@@ -15,8 +23,10 @@ import {
 } from './ffmpeg';
 import type { MediaServer } from './MediaServer';
 import { detectSubtitleCharenc, extractSubtitles } from './subtitleExtractor';
+import { retimeSubtitles, subtitleCues } from './subtitles/search';
 import type { UpnpDevice } from './upnp/DevicesScanner';
 import { UpnpPlayer } from './upnp/Player';
+import { sourceName } from './videoSource';
 
 type KnownDevice = ChromecastDevice | UpnpDevice;
 
@@ -35,6 +45,13 @@ export class PlaybackController {
   private currentDevice?: KnownDevice;
   private statusInterval?: NodeJS.Timeout;
   private currentlyTranscoded?: boolean;
+  private current?: NowPlaying;
+  private lastStatus?: PlayerStatus;
+  private lastStatusAt = 0;
+  private scale = loadSubtitleScale();
+  private external?: { videoPath: string; path: string };
+  // The retimed copy playing in place of `original`, shifted by `offset` seconds.
+  private timing?: { videoPath: string; path: string; original: string | number; offset: number };
   private loading = false;
   private polling = false;
 
@@ -65,9 +82,11 @@ export class PlaybackController {
             targetIp: device.ip,
           });
 
-    renderer.onStatus((s) =>
-      sendEvent(this.window, 'status', { ...s, transcoded: this.currentlyTranscoded })
-    );
+    renderer.onStatus((s) => {
+      this.lastStatus = { ...s, transcoded: this.currentlyTranscoded };
+      this.lastStatusAt = Date.now();
+      sendEvent(this.window, 'status', this.lastStatus);
+    });
     try {
       await renderer.connect();
     } catch (err) {
@@ -114,15 +133,204 @@ export class PlaybackController {
       throw new Error('A video is already loading');
     }
     this.loading = true;
+    // A DLNA TV draws a subtitle file at its own size: any other size means burning in.
+    const burn =
+      burnSubtitles ||
+      (this.currentDevice.type === 'upnp' &&
+        subtitlesPathOrIndex !== undefined &&
+        this.scale !== 1);
     try {
-      await this.loadOn(this.renderer, this.currentDevice, videoPath, {
+      const resizableSubtitles = await this.loadOn(this.renderer, this.currentDevice, videoPath, {
         subtitlesPathOrIndex,
         audioIndex,
-        burnSubtitles,
+        burnSubtitles: burn,
       });
+      this.current = {
+        videoPath,
+        subtitlesPathOrIndex,
+        audioIndex,
+        burnSubtitles: burn,
+        deviceName: this.currentDevice.name,
+        resizableSubtitles,
+      };
+      if (typeof subtitlesPathOrIndex === 'string' && subtitlesPathOrIndex !== this.timing?.path) {
+        this.external = { videoPath, path: subtitlesPathOrIndex };
+      }
+      sendEvent(this.window, 'nowPlaying', this.current);
     } finally {
       this.loading = false;
     }
+  }
+
+  get subtitleScale(): number {
+    return this.scale;
+  }
+
+  // Remembered for the next loads, and applied to the one playing: a Chromecast restyles
+  // its track live; a burned-in stream picks it up at the next GET, which a seek to where
+  // it is triggers; a DLNA TV drawing a subtitle file reloads with them burned in.
+  async setSubtitleScale(scale: number): Promise<void> {
+    if (!SUBTITLE_SCALES.some((s) => s.value === scale)) {
+      throw new Error('Unknown subtitle size');
+    }
+    this.scale = scale;
+    saveSubtitleScale(scale);
+    sendEvent(this.window, 'subtitleScale', scale);
+    if (!this.current?.resizableSubtitles || !this.renderer) return;
+    if (this.renderer.setSubtitleScale) {
+      await this.renderer.setSubtitleScale(scale);
+    } else if (!this.current.burnSubtitles) {
+      if (scale !== 1) await this.reloadAt({ burnSubtitles: true });
+    } else {
+      this.server.setSubtitleScale(scale);
+      await this.seek(this.position());
+    }
+  }
+
+  get nowPlaying(): NowPlaying | undefined {
+    return this.current;
+  }
+
+  get status(): PlayerStatus | undefined {
+    return this.lastStatus;
+  }
+
+  // Where playback is now: the last status, run forward while playing.
+  position(): number {
+    const s = this.lastStatus;
+    if (!s) return 0;
+    const elapsed = s.playerState === 'PLAYING' ? (Date.now() - this.lastStatusAt) / 1000 : 0;
+    return s.currentTime + elapsed;
+  }
+
+  // The audio and subtitle tracks of the video playing, for switching while it plays (the
+  // window and the phone remote label them the same way).
+  async tracks(): Promise<PlayingTracks> {
+    const current = this.playing();
+    const data = await probe(current.videoPath);
+    // A retimed copy is shown as the track it was made from.
+    const { source: subs, offset } = this.subtitleTiming(current);
+    const external = this.externalFor(current.videoPath);
+    return {
+      deviceType: this.currentDevice?.type ?? 'upnp',
+      audio: data.streams
+        .filter((s) => s.codec_type === 'audio')
+        .map((s) => ({ language: s.tags?.language, title: s.tags?.title, channels: s.channels })),
+      subtitles: data.streams
+        .filter((s) => s.codec_type === 'subtitle')
+        .map((s) => ({
+          language: s.tags?.language,
+          title: s.tags?.title,
+          bitmap: isBitmapSubtitleCodec(s.codec_name),
+        })),
+      externalName: external && basename(external),
+      selected: {
+        audioIndex: current.audioIndex ?? 0,
+        subtitles: typeof subs === 'number' ? subs : subs !== undefined ? 'external' : null,
+      },
+      subtitleOffset: offset,
+    };
+  }
+
+  // Switches audio and/or subtitles of the video playing: a reload where it was.
+  async changeTracks(change: TrackChange): Promise<void> {
+    const current = this.playing();
+    let { subtitlesPathOrIndex, burnSubtitles } = current;
+    if (change.subtitles === null) {
+      subtitlesPathOrIndex = undefined;
+    } else if (change.subtitles === 'external') {
+      const external = this.externalFor(current.videoPath);
+      if (!external) throw new Error('No subtitle file was added to this video');
+      subtitlesPathOrIndex = external;
+    } else if (typeof change.subtitles === 'number') {
+      const stream = (await probe(current.videoPath)).streams.filter(
+        (s) => s.codec_type === 'subtitle'
+      )[change.subtitles];
+      if (!stream) throw new Error('Unknown subtitle track');
+      if (isBitmapSubtitleCodec(stream.codec_name)) {
+        if (this.currentDevice?.type === 'chromecast') {
+          throw new Error('Image subtitles can’t be shown on a Chromecast');
+        }
+        // A TV can't draw image subtitles from a file: they have to be burned in.
+        burnSubtitles = true;
+      }
+      subtitlesPathOrIndex = change.subtitles;
+    }
+    await this.reloadAt({
+      subtitlesPathOrIndex,
+      audioIndex: change.audioIndex ?? current.audioIndex,
+      burnSubtitles,
+    });
+  }
+
+  // Cues of the subtitles playing as text, at their original timing (see retime); empty
+  // for image subtitles or none.
+  async cues(): Promise<SubtitleCue[]> {
+    const current = this.playing();
+    const { source } = this.subtitleTiming(current);
+    if (source === undefined) return [];
+    return subtitleCues(current.videoPath, source).catch(() => []);
+  }
+
+  // Plays the subtitles shifted by `offset` seconds from their original timing, reloaded
+  // where it was: always from the original (a new SRT in the cache), so offsets don't
+  // stack up, and 0 goes back to the original itself.
+  async retime(offset: number): Promise<void> {
+    const current = this.playing();
+    const { source } = this.subtitleTiming(current);
+    if (source === undefined) throw new Error('No subtitles are playing');
+    if (offset === 0) {
+      this.timing = undefined;
+      await this.reloadAt({ subtitlesPathOrIndex: source });
+      return;
+    }
+    const saved = await retimeSubtitles(current.videoPath, source, { offset, ratio: 1 });
+    this.timing = { videoPath: current.videoPath, path: saved.path, original: source, offset };
+    await this.reloadAt({ subtitlesPathOrIndex: saved.path });
+  }
+
+  // The subtitles behind what plays, and their shift: a retimed copy maps back to its source.
+  private subtitleTiming(current: NowPlaying): {
+    source: string | number | undefined;
+    offset: number;
+  } {
+    const t = this.timing;
+    return t && t.videoPath === current.videoPath && t.path === current.subtitlesPathOrIndex
+      ? { source: t.original, offset: t.offset }
+      : { source: current.subtitlesPathOrIndex, offset: 0 };
+  }
+
+  private playing(): NowPlaying {
+    if (!this.current) throw new Error('Nothing is playing');
+    return this.current;
+  }
+
+  // The subtitle file last loaded with this video, kept while other tracks are tried.
+  private externalFor(videoPath: string): string | undefined {
+    return this.external?.videoPath === videoPath ? this.external.path : undefined;
+  }
+
+  // Reloads the current video with other options and returns to where it was. A TV only
+  // reads subtitles and audio at load (and burned-in subtitles are in the stream itself).
+  private async reloadAt(options: Partial<LoadOptions>): Promise<void> {
+    const current = this.playing();
+    const position = this.position();
+    // So the wait below sees the new stream's status, not the old one's.
+    this.lastStatus = undefined;
+    const next = { ...current, ...options };
+    await this.load(
+      current.videoPath,
+      next.subtitlesPathOrIndex,
+      next.audioIndex,
+      next.burnSubtitles
+    );
+    // Seeking before the TV has started the new stream is ignored or fails.
+    const started = (): boolean => this.lastStatus?.playerState === 'PLAYING';
+    const deadline = Date.now() + 20_000;
+    while (!started() && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    await this.seek(position);
   }
 
   private async loadOn(
@@ -130,14 +338,14 @@ export class PlaybackController {
     device: KnownDevice,
     videoPath: string,
     { subtitlesPathOrIndex, audioIndex, burnSubtitles }: LoadOptions
-  ): Promise<void> {
+  ): Promise<boolean> {
     const targetIp = device.ip;
     const probeData = await probe(videoPath);
     const rawDuration = Number(probeData.format.duration);
     const duration = Number.isFinite(rawDuration) ? rawDuration : undefined;
     const rawSize = Number(probeData.format.size);
     const size = Number.isFinite(rawSize) && rawSize > 0 ? rawSize : undefined;
-    const title = basename(videoPath);
+    const title = sourceName(videoPath);
     const videoStream = probeData.streams.find((s) => s.codec_type === 'video');
     const videoSize =
       videoStream?.width && videoStream?.height
@@ -211,7 +419,8 @@ export class PlaybackController {
           duration,
           size,
         });
-        return;
+        // The TV draws the sidecar at its own size; another size reloads it burned in.
+        return subtitlesPathOrIndex !== undefined;
       }
 
       this.currentlyTranscoded = true;
@@ -224,6 +433,7 @@ export class PlaybackController {
         frameRate: parseFrameRate(videoStream?.avg_frame_rate),
         audioTrackIndex: audioIndex,
         hdr: isHdrTransfer(videoStream?.color_transfer),
+        subtitleScale: this.scale,
       });
       await renderer.loadVideo({
         title,
@@ -234,7 +444,7 @@ export class PlaybackController {
         subtitlesFormat: subtitlesUrl ? 'smi' : undefined,
         duration,
       });
-      return;
+      return subtitlesPathOrIndex !== undefined;
     }
 
     // Chromecast is always direct play today, and its receiver has no AVI demuxer.
@@ -261,7 +471,9 @@ export class PlaybackController {
       subtitlesUrl,
       subtitlesFormat: 'vtt',
       duration,
+      subtitleScale: this.scale,
     });
+    return !!subtitlesUrl;
   }
 
   async play(): Promise<void> {
@@ -291,6 +503,29 @@ export class PlaybackController {
     this.renderer = undefined;
     this.currentDevice = undefined;
     this.currentlyTranscoded = undefined;
+    this.lastStatus = undefined;
+    if (this.current) {
+      this.current = undefined;
+      sendEvent(this.window, 'nowPlaying', null);
+    }
     await renderer?.close().catch((err) => console.warn('[playback] close failed:', err));
   }
+}
+
+function scalePath(): string {
+  return join(app.getPath('userData'), 'subtitle-size.json');
+}
+
+function loadSubtitleScale(): number {
+  try {
+    const { scale } = JSON.parse(readFileSync(scalePath(), 'utf8'));
+    if (SUBTITLE_SCALES.some((s) => s.value === scale)) return scale;
+  } catch {
+    // Never changed.
+  }
+  return 1;
+}
+
+function saveSubtitleScale(scale: number): void {
+  writeFileSync(scalePath(), JSON.stringify({ scale }));
 }

@@ -2,6 +2,15 @@ import { promisify } from 'node:util';
 import { Client, DefaultMediaReceiver, type Media, type MediaStatus } from 'castv2-client';
 import type { LoadVideoOptions, PlayerState, PlayerStatus, Renderer } from '../../shared/types';
 
+// https://github.com/thibauts/node-castv2-client/wiki/How-to-use-subtitles-with-the-DefaultMediaReceiver-app#subtitle-styling
+const TEXT_TRACK_STYLE: NonNullable<Media['textTrackStyle']> = {
+  fontFamily: 'Droid Sans',
+  fontGenericFamily: 'SANS_SERIF',
+  backgroundColor: '#00000000',
+  edgeType: 'OUTLINE',
+  edgeColor: '#000000FF',
+};
+
 export class CastPlayer implements Renderer {
   private readonly client: Client = new Client();
   private player?: DefaultMediaReceiver;
@@ -55,7 +64,12 @@ export class CastPlayer implements Renderer {
     });
   }
 
-  async loadVideo({ title, videoUrl, subtitlesUrl }: LoadVideoOptions): Promise<void> {
+  async loadVideo({
+    title,
+    videoUrl,
+    subtitlesUrl,
+    subtitleScale = 1,
+  }: LoadVideoOptions): Promise<void> {
     if (!this.player) {
       throw new Error('Player not ready');
     }
@@ -72,14 +86,7 @@ export class CastPlayer implements Renderer {
     };
 
     if (subtitlesUrl) {
-      // https://github.com/thibauts/node-castv2-client/wiki/How-to-use-subtitles-with-the-DefaultMediaReceiver-app#subtitle-styling
-      media.textTrackStyle = {
-        fontFamily: 'Droid Sans',
-        fontGenericFamily: 'SANS_SERIF',
-        backgroundColor: '#00000000',
-        edgeType: 'OUTLINE',
-        edgeColor: '#000000FF',
-      };
+      media.textTrackStyle = { ...TEXT_TRACK_STYLE, fontScale: subtitleScale };
       media.tracks = [
         {
           trackId: 1,
@@ -96,6 +103,18 @@ export class CastPlayer implements Renderer {
     await promisify(this.player.load).bind(this.player)(media, {
       autoplay: true,
       activeTrackIds: subtitlesUrl ? [1] : [],
+    });
+  }
+
+  // Live: the receiver restyles the track it is showing (EDIT_TRACKS_INFO).
+  async setSubtitleScale(scale: number): Promise<void> {
+    if (!this.player) {
+      throw new Error('Player not ready');
+    }
+    const media = this.player.media;
+    return promisify(media.sessionRequest).bind(media)({
+      type: 'EDIT_TRACKS_INFO',
+      textTrackStyle: { ...TEXT_TRACK_STYLE, fontScale: scale },
     });
   }
 

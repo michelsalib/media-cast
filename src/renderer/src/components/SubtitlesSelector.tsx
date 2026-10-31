@@ -2,14 +2,14 @@ import { CheckRounded } from '@mui/icons-material';
 import { Button, Stack, Tooltip } from '@mui/material';
 import { useEffect, useState } from 'react';
 import { isBitmapSubtitleCodec } from '../../../shared/subtitles';
-import type { DeviceType } from '../../../shared/types';
-import { api, pathFor } from '../ipc';
-import { languageName } from '../labels';
+import type { DeviceType, VideoSource } from '../../../shared/types';
+import { api } from '../ipc';
+import { subtitleTrackName } from '../labels';
 import { chipSx } from '../theme';
 import { NO_SUBTITLES, type SubtitlesFile, type SubtitlesSelection } from './SubtitlesSelection';
 
 type Props = {
-  videoFile?: File;
+  video?: VideoSource;
   subFile?: SubtitlesFile;
   deviceType?: DeviceType;
   onChange?: (selection: SubtitlesSelection) => void;
@@ -43,19 +43,10 @@ function choiceLabel(c: SubtitlesSelection): string {
   }
 }
 
-// "English", "English · SDH", or the track title alone when it already names the language.
-function trackName(language: string | undefined, title: string | undefined, i: number): string {
-  const lang = languageName(language);
-  if (lang && title && !title.toLowerCase().includes(lang.toLowerCase())) {
-    return `${lang} · ${title}`;
-  }
-  return title || lang || `Track ${i + 1}`;
-}
-
 export default function SubtitlesSelector({
   onChange,
   subFile,
-  videoFile,
+  video,
   deviceType,
 }: Props): React.JSX.Element {
   const [choices, setChoices] = useState<SubtitlesSelection[]>([NO_SUBTITLES]);
@@ -71,15 +62,15 @@ export default function SubtitlesSelector({
         newChoices.push({ type: 'external', name: subFile.name, path: subFile.path });
       }
 
-      if (videoFile) {
-        const probeData = await api.probe(pathFor(videoFile));
+      if (video) {
+        const probeData = await api.probe(video.path);
         const internal = probeData.streams
           .filter((s) => s.codec_type === 'subtitle')
           .map(
             (s, i): SubtitlesSelection => ({
               type: 'internal',
               index: i,
-              name: trackName(s.tags?.language, s.tags?.title, i),
+              name: subtitleTrackName({ ...s.tags }, i),
               bitmap: isBitmapSubtitleCodec(s.codec_name),
             })
           );
@@ -106,7 +97,7 @@ export default function SubtitlesSelector({
     return () => {
       cancelled = true;
     };
-  }, [videoFile, subFile, deviceType]);
+  }, [video, subFile, deviceType]);
 
   useEffect(() => {
     onChange?.(choice);

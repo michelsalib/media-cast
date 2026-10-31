@@ -1,4 +1,4 @@
-import { basename, extname } from 'node:path';
+import { sourceStem } from '../videoSource';
 
 export interface ReleaseInfo {
   title: string;
@@ -14,7 +14,7 @@ const TAIL_TOKEN =
 // Best-effort title / year / episode from a file name. The search dialog lets the user
 // correct whatever this gets wrong.
 export function parseReleaseName(videoPath: string): ReleaseInfo {
-  const name = basename(videoPath, extname(videoPath));
+  const name = sourceStem(videoPath);
   const words = name
     .replace(/\[[^\]]*\]/g, ' ')
     .replace(/[._]+/g, ' ')
@@ -63,7 +63,7 @@ export function releaseSimilarity(videoPath: string, release: string): number {
         .split(/[^a-z0-9]+/)
         .filter((t) => t.length > 1)
     );
-  const video = tokens(basename(videoPath, extname(videoPath)));
+  const video = tokens(sourceStem(videoPath));
   let shared = 0;
   for (const t of tokens(release)) {
     if (video.has(t)) shared++;

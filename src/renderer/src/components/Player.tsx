@@ -1,12 +1,15 @@
 import { StopRounded, SyncRounded, VideoLibraryOutlined } from '@mui/icons-material';
 import { Box, Button, Slider, Stack, Tooltip, Typography } from '@mui/material';
 import format from 'format-duration';
-import { useState } from 'react';
+import { useReducer, useState } from 'react';
 import type { Device, PlayerStatus } from '../../../shared/types';
 import { api } from '../ipc';
+import { SeekHold } from '../seekHold';
 import { cardSx, tonalSx } from '../theme';
 import { Artwork } from './Artwork';
+import PlayingOptionsButton from './PlayingOptionsButton';
 import PlayPause from './PlayPauseSeek';
+import RemoteButton from './RemoteButton';
 
 type Props = {
   status: PlayerStatus;
@@ -14,6 +17,10 @@ type Props = {
   artworkUrl?: string;
   title: string;
   details?: string;
+  // Extra chips next to the playback state.
+  badges?: React.ReactNode;
+  // The subtitles playing can be resized on this TV.
+  resizableSubtitles?: boolean;
   onBrowse: () => void;
   onStop: () => void;
 };
@@ -31,18 +38,24 @@ export default function Player({
   artworkUrl,
   title,
   details,
+  badges,
+  resizableSubtitles,
   onBrowse,
   onStop,
 }: Props): React.JSX.Element {
   const [dragValue, setDragValue] = useState<number | undefined>();
+  const [seekHold] = useState(() => new SeekHold());
+  const [, rerender] = useReducer((n: number) => n + 1, 0);
   const duration = status.duration || 0;
-  const position = dragValue ?? status.currentTime ?? 0;
+  const position = dragValue ?? seekHold.shown(status.currentTime ?? 0);
 
   // Seek once on release. onChange fires continuously while dragging: every Seek makes a
   // UPnP TV re-request the stream, which restarts the transcoder each time. Meanwhile the
   // thumb follows the drag instead of snapping back to each 1 s status tick.
-  function seek(_evt: unknown, value: number): void {
+  function seek(value: number): void {
+    seekHold.hold(value);
     setDragValue(undefined);
+    rerender();
     void api.seek(value);
   }
 
@@ -108,6 +121,7 @@ export default function Player({
                 </Stack>
               </Tooltip>
             )}
+            {badges}
           </Stack>
           <Typography
             variant="h1"
@@ -134,7 +148,7 @@ export default function Player({
           value={position}
           disabled={!duration}
           onChange={(_evt, value) => setDragValue(value)}
-          onChangeCommitted={seek}
+          onChangeCommitted={(_evt, value) => seek(value)}
           sx={{ height: 6, py: 1 }}
         />
         <Stack
@@ -157,15 +171,21 @@ export default function Player({
             mt: 0.5,
           }}
         >
-          <Box>
+          <Stack direction="row" spacing={1}>
             <Button onClick={onBrowse} startIcon={<VideoLibraryOutlined />} sx={tonalSx}>
               Another video
             </Button>
-          </Box>
-          <Stack sx={{ alignItems: 'center' }}>
-            <PlayPause status={status} />
+            <PlayingOptionsButton
+              position={position}
+              playing={status.playerState === 'PLAYING'}
+              resizableSubtitles={!!resizableSubtitles}
+            />
           </Stack>
-          <Stack direction="row" sx={{ justifyContent: 'flex-end' }}>
+          <Stack sx={{ alignItems: 'center' }}>
+            <PlayPause status={status} position={position} onSeek={seek} />
+          </Stack>
+          <Stack direction="row" spacing={1} sx={{ justifyContent: 'flex-end' }}>
+            <RemoteButton />
             <Button onClick={onStop} startIcon={<StopRounded />} sx={tonalSx}>
               Stop
             </Button>

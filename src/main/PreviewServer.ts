@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { basename, dirname, extname } from 'node:path';
+import { extname } from 'node:path';
 import { promisify } from 'node:util';
-import send from 'send';
 import { type FFProbeData, isHdrTransfer, probe, transcodePreview } from './ffmpeg';
+import { sendVideo } from './videoSource';
 
 export interface PreviewSource {
   // Set when Chromium can likely play the file as is (seekable, no encoder running).
@@ -44,6 +44,11 @@ export class PreviewServer {
     };
   }
 
+  // The current preview's URL prefix (`<base>/video`, `<base>/preview.mp4`), if any.
+  get baseUrl(): string | undefined {
+    return this.current && `http://127.0.0.1:${this.port}/${this.current.token}`;
+  }
+
   stop(): void {
     this.killEncoder();
     this.current = undefined;
@@ -72,10 +77,7 @@ export class PreviewServer {
     const route = url.pathname.slice(current.token.length + 2);
 
     if (route === 'video') {
-      send(req, encodeURIComponent(basename(current.videoPath)), {
-        root: dirname(current.videoPath),
-        dotfiles: 'allow',
-      }).pipe(res);
+      sendVideo(req, res, current.videoPath);
       return;
     }
 

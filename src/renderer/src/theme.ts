@@ -306,3 +306,17 @@ function toLinear(v: number): number {
 function fromLinear(v: number): number {
   return v <= 0.0031308 ? 12.92 * v : 1.055 * v ** (1 / 2.4) - 0.055;
 }
+
+// A text link that acts as a button (section actions such as "Load file"). Fixed line
+// box and flex centring, so links line up whatever wraps them (a disabled one needs a
+// <span> for its tooltip).
+export const linkSx = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  height: 24,
+  fontSize: 13,
+  fontWeight: 600,
+  fontFamily: 'inherit',
+  textDecoration: 'none',
+  '&:hover': { textDecoration: 'underline' },
+} as const;

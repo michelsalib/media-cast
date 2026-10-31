@@ -16,5 +16,14 @@ export default defineConfig({
       },
     },
     plugins: [react()],
+    build: {
+      rollupOptions: {
+        // remote.html is the phone remote, served on the LAN by RemoteServer.
+        input: {
+          index: resolve('src/renderer/index.html'),
+          remote: resolve('src/renderer/remote.html'),
+        },
+      },
+    },
   },
 });

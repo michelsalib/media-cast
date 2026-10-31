@@ -10,17 +10,17 @@ import { api } from '../ipc';
 
 type Props = {
   status?: PlayerStatus;
+  // The position shown (which may be a seek still in flight), and how to seek.
+  position: number;
+  onSeek: (time: number) => void;
 };
 
-export default function PlayPauseSeek({ status }: Props): React.JSX.Element {
+export default function PlayPauseSeek({ status, position, onSeek }: Props): React.JSX.Element {
   const state = status?.playerState;
   const known = state === 'PLAYING' || state === 'PAUSED';
 
   function seekBy(delta: number): void {
-    if (!status) {
-      return;
-    }
-    void api.seek(Math.max(0, status.currentTime + delta));
+    onSeek(Math.max(0, position + delta));
   }
 
   return (

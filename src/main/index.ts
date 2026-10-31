@@ -29,6 +29,10 @@ import { initialWindowColors, loadThemeSource, onAccentColorChanged } from './ap
 import { MediaServer } from './MediaServer';
 import { PlaybackController } from './PlaybackController';
 import { PreviewServer } from './PreviewServer';
+import { createRemoteApi } from './remote/api';
+import { RemoteHub } from './remote/RemoteHub';
+import { RemoteServer } from './remote/RemoteServer';
+import { TorrentStore } from './torrents';
 import { type UpnpDevice, UpnpDevicesScanner } from './upnp/DevicesScanner';
 
 const port = 4004;
@@ -112,12 +116,16 @@ app.whenReady().then(() => {
   const upnpScanner = new UpnpDevicesScanner();
   const server = new MediaServer(port);
   const preview = new PreviewServer();
+  const torrents = new TorrentStore(join(app.getPath('temp'), 'media-cast-torrents'));
+  const torrentTicker = setInterval(() => {
+    if (torrents.size > 0) sendEvent(mainWindow, 'torrents', torrents.stats());
+  }, 1000);
 
   const knownDevices = new Map<string, KnownDevice>();
   const controller = new PlaybackController(mainWindow, server, () => knownDevices);
 
-  function broadcastDevices(): void {
-    const devices: Device[] = [...knownDevices.values()].map((d) => ({
+  function listDevices(): Device[] {
+    return [...knownDevices.values()].map((d) => ({
       id: d.id,
       type: d.type,
       name: d.name,
@@ -129,7 +137,10 @@ app.whenReady().then(() => {
           }
         : {}),
     }));
-    sendEvent(mainWindow, 'scan', devices);
+  }
+
+  function broadcastDevices(): void {
+    sendEvent(mainWindow, 'scan', listDevices());
   }
 
   function wireScanner<D extends KnownDevice>(scanner: DevicesScanner<D>): void {
@@ -145,9 +156,26 @@ app.whenReady().then(() => {
   wireScanner(upnpScanner);
 
   const scanners: DevicesScanner[] = [chromecastScanner, upnpScanner];
+  const hub = new RemoteHub(mainWindow);
+  const remote = new RemoteServer(
+    createRemoteApi({ window: mainWindow, controller, preview, hub, devices: listDevices }),
+    controller,
+    preview,
+    hub
+  );
 
   registerMainApi(
-    createMainApi({ window: mainWindow, controller, preview, scanners, updater: autoUpdater })
+    createMainApi({
+      window: mainWindow,
+      controller,
+      preview,
+      torrents,
+      remote,
+      hub,
+      playingVideoPath: () => server.videoPath,
+      scanners,
+      updater: autoUpdater,
+    })
   );
 
   // Stop + UNSUBSCRIBE must reach the renderer, or the TV is left on a dead URL and
@@ -159,8 +187,10 @@ app.whenReady().then(() => {
       (async () => {
         await controller.close().catch((err) => console.error('controller close failed:', err));
         for (const s of scanners) s.close();
+        clearInterval(torrentTicker);
+        remote.close();
         server.closeAllConnections();
-        await Promise.all([server.close(), preview.close()]);
+        await Promise.all([server.close(), preview.close(), torrents.close()]);
       })(),
       new Promise<void>((resolve) => setTimeout(resolve, 3000)),
     ]);

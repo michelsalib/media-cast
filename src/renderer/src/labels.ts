@@ -55,3 +55,37 @@ export function episodeLabel(info: {
   }
   return info.year ? String(info.year) : undefined;
 }
+
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '—';
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let value = bytes / 1024;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex++;
+  }
+  return `${value.toFixed(value < 10 ? 1 : 0)} ${units[unitIndex]}`;
+}
+
+// "English · 5.1", or the track title, or "Track 2".
+export function audioTrackName(
+  track: { language?: string; title?: string; channels?: number },
+  i: number
+): string {
+  return (
+    [languageName(track.language) ?? track.title, channelsLabel(track.channels)]
+      .filter(Boolean)
+      .join(' · ') || `Track ${i + 1}`
+  );
+}
+
+// "English", "English · SDH", or the track title alone when it already names the language.
+export function subtitleTrackName(track: { language?: string; title?: string }, i: number): string {
+  const lang = languageName(track.language);
+  if (lang && track.title && !track.title.toLowerCase().includes(lang.toLowerCase())) {
+    return `${lang} · ${track.title}`;
+  }
+  return track.title || lang || `Track ${i + 1}`;
+}

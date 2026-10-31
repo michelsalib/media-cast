@@ -196,6 +196,8 @@ export interface TranscodeOptions {
   frameRate?: number;
   audioTrackIndex?: number;
   hdr?: boolean;
+  // Burned-in text subtitles, as a scale of their own size; 1 = as authored.
+  subtitleScale?: number;
 }
 
 // Never encode above 1080p. A 4K H.264 stream is outside what High@4.x TV decoders
@@ -222,6 +224,7 @@ export async function transcodeToMpegTs(options: TranscodeOptions): Promise<Tran
     frameRate,
     audioTrackIndex = 0,
     hdr = false,
+    subtitleScale = 1,
   } = options;
   const downscaled =
     !!videoSize && (videoSize.width > MAX_OUTPUT.width || videoSize.height > MAX_OUTPUT.height);
@@ -256,12 +259,13 @@ export async function transcodeToMpegTs(options: TranscodeOptions): Promise<Tran
       burnSubtitles.trackIndex,
       burnSubtitles.bitmap.canvas,
       croppedSize,
-      videoSize ? fitRatio(videoSize, MAX_OUTPUT) : 1
+      videoSize ? fitRatio(videoSize, MAX_OUTPUT) : 1,
+      subtitleScale
     );
     args.push('-filter_complex', graph, '-map', '[out]');
   } else {
     if (burnSubtitles) {
-      videoFilters.push(buildSubtitlesFilter(burnSubtitles, croppedSize));
+      videoFilters.push(buildSubtitlesFilter(burnSubtitles, croppedSize, subtitleScale));
     }
     args.push('-vf', videoFilters.join(','), '-map', '0:v:0');
   }
@@ -462,7 +466,9 @@ function buildBitmapOverlayGraph(
   videoSize: VideoSize | undefined,
   // Factor the video was downscaled by; the canvas must shrink with it or padding to
   // it would bring the frame back above 1080p.
-  downscale: number
+  downscale: number,
+  // The subtitle size chosen; the whole subtitle canvas is scaled by it.
+  subtitleScale = 1
 ): string {
   const video = [...videoFilters];
   const subs = ['null'];
@@ -484,16 +490,25 @@ function buildBitmapOverlayGraph(
   } else if (videoSize) {
     subs.push(`scale=${videoSize.width}:${videoSize.height}`);
   }
+  // Resized subtitles keep the canvas's bottom edge on the frame's, where cues sit: larger
+  // ones grow upwards (the canvas sides that overflow are empty), smaller ones shrink
+  // towards the bottom centre.
+  let position = '(W-w)/2:(H-h)/2';
+  if (subtitleScale !== 1) {
+    subs.push(`scale=trunc(iw*${subtitleScale}/2)*2:trunc(ih*${subtitleScale}/2)*2`);
+    position = '(W-w)/2:H-h';
+  }
   return [
     `[0:v:0]${video.join(',')}[video]`,
     `[0:s:${trackIndex}]${subs.join(',')}[subs]`,
-    '[video][subs]overlay=(W-w)/2:(H-h)/2:eof_action=pass[out]',
+    `[video][subs]overlay=${position}:eof_action=pass[out]`,
   ].join(';');
 }
 
 export function buildSubtitlesFilter(
   spec: SubtitleSource,
-  videoSize: VideoSize | undefined
+  videoSize: VideoSize | undefined,
+  scale = 1
 ): string {
   const path = spec.source === 'external' ? spec.path : spec.videoPath;
   const parts = [`filename=${escapeFilterPath(path)}`];
@@ -505,6 +520,12 @@ export function buildSubtitlesFilter(
   }
   if (videoSize) {
     parts.push(`original_size=${videoSize.width}x${videoSize.height}`);
+  }
+  if (scale !== 1) {
+    // ScaleX/ScaleY rather than FontSize: each style of an ASS file keeps its own font
+    // size relative to the others. A factor, not the percent ASS files use: libass
+    // applies overrides without its usual /100 (100 here renders 100× — off screen).
+    parts.push(`force_style='ScaleX=${scale},ScaleY=${scale}'`);
   }
   return `subtitles=${parts.join(':')}`;
 }

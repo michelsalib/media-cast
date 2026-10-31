@@ -10,10 +10,12 @@ import {
 } from '@mui/material';
 import { useRef, useState } from 'react';
 import type { FFProbeData } from '../../../main/ffmpeg';
-import { api, pathFor } from '../ipc';
+import type { VideoSource } from '../../../shared/types';
+import { api } from '../ipc';
+import { formatBytes } from '../labels';
 
 interface Props {
-  video: File;
+  video: VideoSource;
   sx?: SxProps<Theme>;
 }
 
@@ -37,7 +39,7 @@ export default function VideoInfoButton({ video, sx }: Props): React.JSX.Element
     setOpen(true);
     if (!info && !error) {
       try {
-        setInfo(await api.probe(pathFor(video)));
+        setInfo(await api.probe(video.path));
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       }
@@ -193,19 +195,6 @@ function formatDuration(seconds: number): string {
   return h > 0
     ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
     : `${m}:${String(s).padStart(2, '0')}`;
-}
-
-function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '—';
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ['KB', 'MB', 'GB', 'TB'];
-  let value = bytes / 1024;
-  let unitIndex = 0;
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024;
-    unitIndex++;
-  }
-  return `${value.toFixed(value < 10 ? 1 : 0)} ${units[unitIndex]}`;
 }
 
 function formatBitrate(bitsPerSec: number): string {

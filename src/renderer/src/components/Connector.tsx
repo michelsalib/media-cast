@@ -7,13 +7,15 @@ import { api, onEvent } from '../ipc';
 
 type Props = {
   label: string;
+  // Extra links after "Look again".
+  actions?: React.ReactNode;
   connection: Connection | null;
   onSelect: (device: Device) => void;
 };
 
 const TYPE_LABELS: Record<Device['type'], string> = { upnp: 'TV', chromecast: 'Chromecast' };
 
-export function Connector({ label, connection, onSelect }: Props): React.JSX.Element {
+export function Connector({ label, actions, connection, onSelect }: Props): React.JSX.Element {
   const [devices, setDevices] = useState<Device[]>([]);
   const [scanning, setScanning] = useState(false);
 
@@ -48,6 +50,7 @@ export function Connector({ label, connection, onSelect }: Props): React.JSX.Ele
         >
           {scanning ? 'Looking…' : 'Look again'}
         </Button>
+        {actions}
       </Stack>
 
       <Stack direction="row" spacing={1} sx={{ overflowX: 'auto', pb: 0.5 }}>

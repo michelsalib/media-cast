@@ -9,11 +9,11 @@ import {
 } from '@mui/material';
 import CssBaseline from '@mui/material/CssBaseline';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import logo from '../../../build/icon.svg';
 import type { Device, ThemeSource } from '../../shared/types';
-import AppInfoButton from './components/AppInfoButton';
 import { Connector } from './components/Connector';
 import Dropper from './components/Dropper';
-import ThemeButton from './components/ThemeButton';
+import SettingsMenu from './components/SettingsMenu';
 import UpdateButton from './components/UpdateButton';
 import { api, errorMessage, onEvent } from './ipc';
 import { DEFAULT_ACCENT, makeTheme } from './theme';
@@ -74,6 +74,8 @@ function App(): React.JSX.Element {
     setConnection((c) => c && { ...c, state: 'DISCONNECTED' });
   }, []);
 
+  useEffect(() => onEvent('remoteStop', stop), [stop]);
+
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline>
@@ -82,9 +84,10 @@ function App(): React.JSX.Element {
             connection={connection}
             onConnect={connect}
             onStop={stop}
-            devices={(label) => (
+            devices={(label, actions) => (
               <Connector
                 label={label}
+                actions={actions}
                 connection={connection}
                 onSelect={(device) => void connect(device)}
               />
@@ -100,7 +103,7 @@ function App(): React.JSX.Element {
               alignItems: 'center',
               appRegion: 'drag',
               height: 32,
-              pl: 2,
+              pl: 1.5,
               pr: 1,
               // Sized to the draggable area so icons sit flush against the system
               // window controls without overlap (controls live outside this width).
@@ -108,14 +111,14 @@ function App(): React.JSX.Element {
               left: 'env(titlebar-area-x, 0px)',
             }}
           >
+            <Box component="img" src={logo} alt="" sx={{ width: 18, height: 18, mr: 0.5 }} />
             <Typography
               sx={{ fontSize: 12, fontWeight: 600, color: 'text.secondary', flexGrow: 1 }}
             >
               Media Cast
             </Typography>
             <UpdateButton />
-            <ThemeButton value={themeSource} onChange={chooseThemeSource} />
-            <AppInfoButton />
+            <SettingsMenu themeSource={themeSource} onThemeSourceChange={chooseThemeSource} />
           </Stack>
           <Snackbar
             open={!!connectError}

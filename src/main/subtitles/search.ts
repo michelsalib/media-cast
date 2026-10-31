@@ -11,6 +11,7 @@ import type {
   SubtitleTiming,
 } from '../../shared/subtitleSearch';
 import { extractSubtitles, parseSrt, TEXT_SUBTITLE_EXTENSIONS } from '../subtitleExtractor';
+import { sourceStem } from '../videoSource';
 import { movieHash } from './movieHash';
 import { ProviderSkipped, type SubtitleProvider } from './provider';
 import { gestdown } from './providers/gestdown';
@@ -180,7 +181,7 @@ export async function retimeSubtitles(
   const source =
     typeof subtitlesPathOrIndex === 'string'
       ? basename(subtitlesPathOrIndex, extname(subtitlesPathOrIndex))
-      : `${basename(videoPath, extname(videoPath))}.track${subtitlesPathOrIndex}`;
+      : `${sourceStem(videoPath)}.track${subtitlesPathOrIndex}`;
   const label = `${timing.offset >= 0 ? '+' : ''}${timing.offset.toFixed(1)}s${timing.ratio !== 1 ? `.x${timing.ratio.toFixed(4)}` : ''}`;
   const dir = join(await cacheDir(), 'resynced');
   await mkdir(dir, { recursive: true });

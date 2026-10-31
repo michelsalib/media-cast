@@ -40,3 +40,20 @@ export function localIPv4Addresses(): string[] {
     .map((i) => i?.address)
     .filter((a): a is string => !!a);
 }
+
+// Adapters only this computer can reach: WSL, Hyper-V, Docker, VM host-only networks.
+const VIRTUAL_ADAPTER =
+  /vEthernet|WSL|Hyper-V|VirtualBox|VMware|Docker|^(docker|br-|veth|virbr|vboxnet|vmnet)/i;
+
+// Addresses another device on the network (a phone) can reach this computer at: no
+// virtual adapters, no link-local, home networks (192.168/16) first.
+export function lanAddresses(): string[] {
+  const rank = (ip: string): number =>
+    ip.startsWith('192.168.') ? 0 : ip.startsWith('10.') ? 1 : 2;
+  return Object.entries(networkInterfaces())
+    .filter(([name]) => !VIRTUAL_ADAPTER.test(name))
+    .flatMap(([, ifaces]) => ifaces ?? [])
+    .filter((i) => i.family === 'IPv4' && !i.internal && !i.address.startsWith('169.254.'))
+    .map((i) => i.address)
+    .sort((a, b) => rank(a) - rank(b));
+}

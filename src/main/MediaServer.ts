@@ -1,9 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { basename, dirname, extname } from 'node:path';
+import { extname } from 'node:path';
 import { Transform } from 'node:stream';
 import { promisify } from 'node:util';
-import send from 'send';
 import {
   type SubtitleSource,
   type TranscodeHandle,
@@ -12,6 +11,7 @@ import {
 } from './ffmpeg';
 import { pickLocalIpFor } from './network';
 import { DIRECT_PLAY_FEATURES, TRANSCODED_FEATURES } from './upnp/dlna';
+import { sendVideo } from './videoSource';
 
 export interface ServeVideoOptions {
   transcode?: boolean;
@@ -22,6 +22,7 @@ export interface ServeVideoOptions {
   frameRate?: number;
   audioTrackIndex?: number;
   hdr?: boolean;
+  subtitleScale?: number;
 }
 
 export interface ServeSubtitlesOptions {
@@ -39,6 +40,7 @@ export class MediaServer {
   private currentFrameRate?: number;
   private currentAudioTrackIndex?: number;
   private currentHdr = false;
+  private currentSubtitleScale = 1;
   private currentSubtitlesData?: Buffer;
   private currentSubtitlesFormat: 'vtt' | 'srt' | 'smi' = 'vtt';
   private sessionHash = randomUUID();
@@ -94,17 +96,10 @@ export class MediaServer {
       if (this.currentVideoTranscode) {
         await this.handleTranscodedVideo(req, res, this.currentVideoPath);
       } else {
-        // send() URL-decodes and dot-checks its path argument, so hand it a root plus an
-        // encoded file name: a raw path with `%` or a `.directory` would 400/404.
-        send(req, encodeURIComponent(basename(this.currentVideoPath)), {
-          root: dirname(this.currentVideoPath),
-          dotfiles: 'allow',
-        })
-          .on('headers', (response: ServerResponse) => {
-            response.setHeader('transferMode.dlna.org', 'Streaming');
-            response.setHeader('contentFeatures.dlna.org', DIRECT_PLAY_FEATURES);
-          })
-          .pipe(res);
+        sendVideo(req, res, this.currentVideoPath, {
+          'transferMode.dlna.org': 'Streaming',
+          'contentFeatures.dlna.org': DIRECT_PLAY_FEATURES,
+        });
       }
       return;
     }
@@ -176,6 +171,7 @@ export class MediaServer {
         frameRate: this.currentFrameRate,
         audioTrackIndex: this.currentAudioTrackIndex,
         hdr: this.currentHdr,
+        subtitleScale: this.currentSubtitleScale,
       });
     } catch (err) {
       console.error('[http] transcode failed to start:', err);
@@ -218,6 +214,16 @@ export class MediaServer {
   // the new file as the media they already have loaded and reuse its cached state —
   // and new requests for the previous session's URLs 404 (responses already in
   // flight keep streaming until the TV drops them).
+  // Burned-in subtitle size for the encoders started from now on (the next GET: a seek).
+  setSubtitleScale(scale: number): void {
+    this.currentSubtitleScale = scale;
+  }
+
+  // The video the TV is being sent, if any.
+  get videoPath(): string | undefined {
+    return this.currentVideoPath;
+  }
+
   startSession(): void {
     this.sessionHash = randomUUID();
     this.currentSubtitlesData = undefined;
@@ -232,6 +238,7 @@ export class MediaServer {
     this.currentFrameRate = options.frameRate;
     this.currentAudioTrackIndex = options.audioTrackIndex;
     this.currentHdr = options.hdr ?? false;
+    this.currentSubtitleScale = options.subtitleScale ?? 1;
     // For direct-played files some DLNA TVs sniff the URL extension, so reflect
     // the source container; transcoded output is always MPEG-TS.
     const ext = options.transcode ? '.ts' : extname(videoPath).toLowerCase() || '';

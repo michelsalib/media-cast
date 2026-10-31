@@ -25,19 +25,29 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { FFProbeData } from '../../../main/ffmpeg';
 import { type CompatReport, checkCompat } from '../../../shared/compat';
-import type { Device, PlayerStatus } from '../../../shared/types';
+import { VIDEO_EXTENSIONS } from '../../../shared/media';
+import type {
+  Device,
+  PlayerStatus,
+  TorrentContents,
+  TorrentStats,
+  VideoSource,
+} from '../../../shared/types';
 import type { Connection } from '../App';
 import { api, errorMessage, onEvent, pathFor } from '../ipc';
 import { episodeLabel, resolutionLabel, runtimeLabel } from '../labels';
-import { cardSx, tonalSx } from '../theme';
+import { cardSx, linkSx, tonalSx } from '../theme';
 import { Artwork, useObjectUrl } from './Artwork';
 import type { AudioSelection } from './AudioSelection';
 import AudioSelector from './AudioSelector';
 import Player from './Player';
+import RemoteButton from './RemoteButton';
 import SubtitleSearchDialog from './SubtitleSearchDialog';
+import SubtitleSizeButton from './SubtitleSizeButton';
 import SubtitleSyncDialog, { type SyncSource } from './SubtitleSyncDialog';
 import { NO_SUBTITLES, type SubtitlesFile, type SubtitlesSelection } from './SubtitlesSelection';
 import SubtitlesSelector from './SubtitlesSelector';
+import { TorrentChip, TorrentPicker } from './Torrent';
 import VideoInfoButton from './VideoInfoButton';
 
 type Props = {
@@ -45,17 +55,18 @@ type Props = {
   onConnect: (device: Device) => Promise<boolean>;
   onStop: () => void;
   // The device picker, labelled for the view it sits in.
-  devices: (label: string) => React.ReactNode;
+  devices: (label: string, actions?: React.ReactNode) => React.ReactNode;
 };
 
 type ReleaseInfo = Awaited<ReturnType<typeof api.guessSubtitleQuery>>;
 
 // What was sent to the TV, kept apart from the video being prepared next.
-type NowPlaying = { thumbnail?: Uint8Array; title: string; details?: string };
+type NowPlaying = { thumbnail?: Uint8Array; title: string; details?: string; infoHash?: string };
 
-const VIDEO_EXTENSIONS = ['.mp4', '.mkv', '.avi'];
 // Text formats main can extract or burn (see TEXT_SUBTITLE_EXTENSIONS in subtitleExtractor).
 const SUBTITLE_EXTENSIONS = ['.srt', '.vtt', '.ass', '.ssa'];
+const TORRENT_EXTENSIONS = ['.torrent', '.magnet'];
+const ALL_EXTENSIONS = [...VIDEO_EXTENSIONS, ...TORRENT_EXTENSIONS, ...SUBTITLE_EXTENSIONS];
 
 export default function Dropper({
   connection,
@@ -64,7 +75,13 @@ export default function Dropper({
   devices,
 }: Props): React.JSX.Element {
   const [isOver, setIsOver] = useState(false);
-  const [video, setVideo] = useState<File | undefined>();
+  const [video, setVideo] = useState<VideoSource | undefined>();
+  const [openingTorrent, setOpeningTorrent] = useState(false);
+  // A torrent with several videos, waiting for the user to pick one.
+  const [torrentChoice, setTorrentChoice] = useState<TorrentContents | undefined>();
+  const [torrentStats, setTorrentStats] = useState<TorrentStats[]>([]);
+  const [resizableSubtitles, setResizableSubtitles] = useState(false);
+  const [subtitleScale, setSubtitleScale] = useState(1);
   const [subs, setSubs] = useState<SubtitlesFile | undefined>();
   const [subtitlesSelection, setSubtitlesSelection] = useState<SubtitlesSelection>(NO_SUBTITLES);
   const [audioSelection, setAudioSelection] = useState<AudioSelection | undefined>();
@@ -85,11 +102,24 @@ export default function Dropper({
   const device = connection?.device ?? null;
   const hasSubs = subtitlesSelection.type !== 'no subtitles';
   const showBurnToggle = device?.type === 'upnp' && hasSubs;
-  // Image-based tracks can't be extracted as sidecar text — burning is the only option.
-  const forceBurn =
-    showBurnToggle && subtitlesSelection.type === 'internal' && subtitlesSelection.bitmap;
-  const effectiveBurn = showBurnToggle && (forceBurn || burnSubtitles);
-  const videoPath = useMemo(() => (video ? pathFor(video) : undefined), [video]);
+  const bitmapSubs = subtitlesSelection.type === 'internal' && subtitlesSelection.bitmap;
+  // Image-based tracks can't be extracted as sidecar text, and a DLNA TV draws a subtitle
+  // file at its own size: either way burning is the only option (main decides the same).
+  const forceBurn = showBurnToggle && (bitmapSubs || subtitleScale !== 1);
+  const effectiveBurn = !!device && burnOn(device);
+  // Any subtitles can be resized: a Chromecast restyles them, a DLNA TV gets them burned in.
+  const resizableOn = hasSubs && !!device;
+  // Burning exists only on UPnP: the toggle's choice there, or forced (see forceBurn).
+  function burnOn(target: Device): boolean {
+    if (target.type !== 'upnp' || !hasSubs) return false;
+    return bitmapSubs || subtitleScale !== 1 || burnSubtitles;
+  }
+  const videoPath = video?.path;
+  // For the listeners registered once.
+  const videoPathRef = useRef(videoPath);
+  videoPathRef.current = videoPath;
+  const statsFor = (infoHash?: string): TorrentStats | undefined =>
+    torrentStats.find((s) => s.infoHash === infoHash);
   // Text tracks only: image subtitles have no lines to show or retime.
   const syncableSelection: SyncSource | undefined =
     subtitlesSelection.type === 'external'
@@ -99,6 +129,44 @@ export default function Dropper({
         : undefined;
 
   useEffect(() => onEvent('status', setStatus), []);
+  useEffect(() => onEvent('torrents', setTorrentStats), []);
+  useEffect(() => {
+    api
+      .subtitleScale()
+      .then(setSubtitleScale)
+      .catch(() => {});
+    return onEvent('subtitleScale', setSubtitleScale);
+  }, []);
+  // The phone remote reloads the video with retimed subtitles: pick those up here too.
+  // Also tells whether the size of the subtitles playing can change.
+  useEffect(
+    () =>
+      onEvent('nowPlaying', (now) => {
+        setResizableSubtitles(!!now?.resizableSubtitles);
+        const path = now?.subtitlesPathOrIndex;
+        if (now?.videoPath !== videoPathRef.current || typeof path !== 'string') return;
+        setSubs((prev) =>
+          prev?.path === path ? prev : { name: path.split(/[\\/]/).pop() ?? path, path }
+        );
+      }),
+    []
+  );
+
+  // A magnet link pasted anywhere but a text field.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: openTorrent only uses setters
+  useEffect(() => {
+    function paste(event: ClipboardEvent): void {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('input, textarea, [contenteditable="true"]')) return;
+      const text = event.clipboardData?.getData('text/plain').trim();
+      if (text && isMagnetLink(text)) {
+        event.preventDefault();
+        void openTorrent(text);
+      }
+    }
+    window.addEventListener('paste', paste);
+    return () => window.removeEventListener('paste', paste);
+  }, []);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-run on device or connection change to clear stale status
   useEffect(() => {
@@ -113,8 +181,9 @@ export default function Dropper({
     for (const file of files) {
       const ext = extensionOf(file.name);
       if (VIDEO_EXTENSIONS.includes(ext)) {
-        setVideo(file);
-        setBrowsing(true);
+        pickVideo({ name: file.name, path: pathFor(file), size: file.size });
+      } else if (TORRENT_EXTENSIONS.includes(ext)) {
+        void openTorrent(pathFor(file));
       } else if (SUBTITLE_EXTENSIONS.includes(ext)) {
         setSubs({ name: file.name, path: pathFor(file) });
       } else {
@@ -123,19 +192,51 @@ export default function Dropper({
     }
     if (rejected.length > 0) {
       setCastError(
-        `Unsupported file: ${rejected.join(', ')} — expected ${[...VIDEO_EXTENSIONS, ...SUBTITLE_EXTENSIONS].join(' ')}`
+        `Unsupported file: ${rejected.join(', ')} — expected ${ALL_EXTENSIONS.join(' ')}`
       );
+    }
+  }
+
+  function pickVideo(source: VideoSource): void {
+    setVideo(source);
+    setBrowsing(true);
+  }
+
+  // `source` is a magnet link or a .torrent/.magnet path. Fetching the file list takes
+  // a few seconds to a minute, depending on how fast peers turn up.
+  async function openTorrent(source: string): Promise<void> {
+    setOpeningTorrent(true);
+    try {
+      // Keep the current video streaming in case the user cancels the picker.
+      const contents = await api.openTorrent(source, videoPathRef.current);
+      if (contents.videos.length === 1) {
+        pickVideo({ ...contents.videos[0], infoHash: contents.infoHash });
+      } else {
+        setTorrentChoice(contents);
+      }
+    } catch (err) {
+      setCastError(errorMessage(err));
+    } finally {
+      setOpeningTorrent(false);
     }
   }
 
   function drop(event: React.DragEvent): void {
     event.preventDefault();
-    ingest(event.dataTransfer.files);
     setIsOver(false);
+    if (event.dataTransfer.files.length > 0) {
+      ingest(event.dataTransfer.files);
+      return;
+    }
+    // A magnet link dragged from a browser.
+    const text = event.dataTransfer.getData('text/plain').trim();
+    if (isMagnetLink(text)) {
+      void openTorrent(text);
+    }
   }
 
   // One hidden input for every picker; `accept` narrows it to what the button offers.
-  function browse(extensions = [...VIDEO_EXTENSIONS, ...SUBTITLE_EXTENSIONS]): void {
+  function browse(extensions = ALL_EXTENSIONS): void {
     const input = fileInput.current;
     if (!input) return;
     input.accept = extensions.join(',');
@@ -166,7 +267,7 @@ export default function Dropper({
       }
 
       try {
-        setThumbnail(await api.thumbnail(pathFor(video)));
+        setThumbnail(await api.thumbnail(video.path));
       } catch {
         setThumbnail(undefined);
       }
@@ -181,7 +282,7 @@ export default function Dropper({
       return;
     }
     let cancelled = false;
-    api.probe(pathFor(video)).then((data) => {
+    api.probe(video.path).then((data) => {
       if (!cancelled) setProbeData(data);
     });
     return () => {
@@ -238,10 +339,16 @@ export default function Dropper({
         : undefined;
 
   const canPlay = !!video && !!device && !casting && connection?.state !== 'CONNECTING';
+  const details = [eyebrow, subtitlesLabel].filter(Boolean).join(' · ') || undefined;
 
-  async function play(): Promise<void> {
-    if (!video || !device || !connection) {
-      return;
+  // `target`: the picked screen, or the one a phone remote chose. Resolves to the error
+  // (also shown here), or undefined once the TV has the video.
+  async function play(target: Device | null = device): Promise<string | undefined> {
+    if (!video || !target) {
+      return 'Nothing is ready to play';
+    }
+    if (casting) {
+      return 'A video is already starting';
     }
     const subsArg =
       subtitlesSelection.type === 'external'
@@ -252,23 +359,42 @@ export default function Dropper({
     setCasting(true);
     setCastError(undefined);
     try {
-      // After Stop the device stays picked but disconnected.
-      if (connection.state !== 'CONNECTED' && !(await onConnect(device))) {
-        return;
+      // After Stop the device stays picked but disconnected; a phone may pick another.
+      const connected = connection?.device.id === target.id && connection.state === 'CONNECTED';
+      if (!connected && !(await onConnect(target))) {
+        return `Couldn’t connect to ${target.name}`;
       }
-      await api.load(pathFor(video), subsArg, audioSelection?.index, effectiveBurn);
-      setNowPlaying({
-        thumbnail,
-        title,
-        details: [eyebrow, subtitlesLabel].filter(Boolean).join(' · ') || undefined,
-      });
+      await api.load(video.path, subsArg, audioSelection?.index, burnOn(target));
+      setNowPlaying({ thumbnail, title, details, infoHash: video.infoHash });
       setBrowsing(false);
+      return undefined;
     } catch (err) {
-      setCastError(errorMessage(err));
+      const message = errorMessage(err);
+      setCastError(message);
+      return message;
     } finally {
       setCasting(false);
     }
   }
+
+  // The phone remote's Play goes through the same play(), with the state of this render.
+  const playRef = useRef(play);
+  playRef.current = play;
+  useEffect(
+    () =>
+      onEvent('remoteLaunch', ({ requestId, device: target }) => {
+        void playRef.current(target).then((error) => api.remoteLaunchDone(requestId, error));
+      }),
+    []
+  );
+
+  // What the phone remote shows as ready to play.
+  useEffect(() => {
+    void api.setRemoteContext({
+      prepared: videoPath ? { videoPath, title, details } : null,
+      deviceId: device?.id ?? null,
+    });
+  }, [videoPath, title, details, device?.id]);
 
   return (
     <Box
@@ -280,7 +406,7 @@ export default function Dropper({
       <input
         ref={fileInput}
         type="file"
-        accept={[...VIDEO_EXTENSIONS, ...SUBTITLE_EXTENSIONS].join(',')}
+        accept={ALL_EXTENSIONS.join(',')}
         multiple
         hidden
         onChange={onFilesPicked}
@@ -295,6 +421,8 @@ export default function Dropper({
             artworkUrl={nowPlayingUrl}
             title={nowPlaying?.title || status.title || 'Now playing'}
             details={nowPlaying?.details}
+            badges={nowPlaying?.infoHash && <TorrentChip stats={statsFor(nowPlaying.infoHash)} />}
+            resizableSubtitles={resizableSubtitles}
             onBrowse={() => browse()}
             onStop={onStop}
           />
@@ -331,8 +459,9 @@ export default function Dropper({
               </Box>
               <Typography variant="h1">Drop a video here</Typography>
               <Typography sx={{ color: 'text.secondary', maxWidth: 420 }}>
-                A movie or an episode, in MP4, MKV or AVI. Drop its subtitle file along with it, or
-                find subtitles online afterwards.
+                A movie or an episode, in MP4, MKV or AVI, or a torrent to stream (paste a magnet
+                link anywhere). Drop its subtitle file along with it, or find subtitles online
+                afterwards.
               </Typography>
               <Button
                 variant="contained"
@@ -343,7 +472,7 @@ export default function Dropper({
                 Choose a video
               </Button>
             </Stack>
-            {devices('Play on')}
+            {devices('Play on', <RemoteButton compact />)}
           </Stack>
         )}
 
@@ -400,6 +529,8 @@ export default function Dropper({
                     >
                       Change
                     </Button>
+                    {/* Last: its live numbers change its width. */}
+                    {video.infoHash && <TorrentChip stats={statsFor(video.infoHash)} />}
                   </Stack>
                 </Stack>
               </Stack>
@@ -417,7 +548,7 @@ export default function Dropper({
               >
                 {hasAudio && (
                   <Section title="Audio">
-                    <AudioSelector videoFile={video} onChange={setAudioSelection} />
+                    <AudioSelector video={video} onChange={setAudioSelection} />
                   </Section>
                 )}
                 <Section
@@ -447,7 +578,7 @@ export default function Dropper({
                               : 'Pick subtitles to check their timing'
                         }
                       >
-                        <span>
+                        <Box component="span" sx={{ display: 'flex' }}>
                           <Link
                             component="button"
                             disabled={!syncableSelection}
@@ -459,14 +590,15 @@ export default function Dropper({
                           >
                             Fix timing
                           </Link>
-                        </span>
+                        </Box>
                       </Tooltip>
+                      {resizableOn && <SubtitleSizeButton link onError={setCastError} />}
                     </>
                   }
                 >
                   <SubtitlesSelector
                     subFile={subs}
-                    videoFile={video}
+                    video={video}
                     deviceType={device?.type}
                     onChange={setSubtitlesSelection}
                   />
@@ -475,9 +607,11 @@ export default function Dropper({
                       placement="top"
                       enterDelay={300}
                       title={
-                        forceBurn
+                        bitmapSubs
                           ? 'These subtitles are images (e.g. Blu-ray PGS) — they can only be shown by burning them into the video.'
-                          : 'Re-encodes the video to embed subtitles. Needed only for TVs that ignore separate subtitle files.'
+                          : forceBurn
+                            ? 'The TV shows subtitle files at its own size: to change their size, they are burned into the video. Set the size back to Normal to send them as a file.'
+                            : 'Re-encodes the video to embed subtitles. Needed only for TVs that ignore separate subtitle files.'
                       }
                     >
                       <FormControlLabel
@@ -505,26 +639,39 @@ export default function Dropper({
               sx={{ alignItems: 'flex-end', px: 2.5, pt: 1, pb: 2.5 }}
             >
               <Box sx={{ flex: 1, minWidth: 0 }}>{devices('Play on')}</Box>
-              <Tooltip title={device ? '' : 'Pick a screen first'} placement="top">
-                <span>
-                  <Button
-                    variant="contained"
-                    size="large"
-                    onClick={() => void play()}
-                    disabled={!canPlay}
-                    startIcon={
-                      casting ? (
-                        <CircularProgress size={20} color="inherit" />
-                      ) : (
-                        <PlayArrowRounded sx={{ '&&': { fontSize: 26 } }} />
-                      )
-                    }
-                    sx={{ mb: 0.5 }}
-                  >
-                    Play
-                  </Button>
-                </span>
-              </Tooltip>
+              {/* Stretched to the device column's height: the link lines up with its header
+                  ("Look again") and Play with its tiles. */}
+              <Stack
+                sx={{
+                  alignSelf: 'stretch',
+                  alignItems: 'flex-end',
+                  justifyContent: 'space-between',
+                }}
+              >
+                <Box sx={{ height: 30, display: 'flex', alignItems: 'center' }}>
+                  <RemoteButton compact />
+                </Box>
+                <Tooltip title={device ? '' : 'Pick a screen first'} placement="top">
+                  <span>
+                    <Button
+                      variant="contained"
+                      size="large"
+                      onClick={() => void play()}
+                      disabled={!canPlay}
+                      startIcon={
+                        casting ? (
+                          <CircularProgress size={20} color="inherit" />
+                        ) : (
+                          <PlayArrowRounded sx={{ '&&': { fontSize: 26 } }} />
+                        )
+                      }
+                      sx={{ mb: 0.5 }}
+                    >
+                      Play
+                    </Button>
+                  </span>
+                </Tooltip>
+              </Stack>
             </Stack>
           </Stack>
         )}
@@ -551,6 +698,29 @@ export default function Dropper({
           />
         </>
       )}
+      <TorrentPicker
+        contents={torrentChoice}
+        onPick={(v) => {
+          if (torrentChoice) pickVideo({ ...v, infoHash: torrentChoice.infoHash });
+          setTorrentChoice(undefined);
+        }}
+        onClose={() => setTorrentChoice(undefined)}
+      />
+      <Backdrop
+        open={openingTorrent}
+        sx={(theme) => ({
+          backgroundColor: alpha(theme.palette.tonal.surface, 0.85),
+          flexDirection: 'column',
+          gap: 2,
+          zIndex: theme.zIndex.modal + 1,
+        })}
+      >
+        <CircularProgress />
+        <Typography variant="h2">Opening the torrent…</Typography>
+        <Typography sx={{ color: 'text.secondary' }}>
+          Looking for people sharing it. This can take up to a minute.
+        </Typography>
+      </Backdrop>
       <Snackbar
         open={!!castError}
         onClose={() => setCastError(undefined)}
@@ -587,14 +757,6 @@ export default function Dropper({
     </Box>
   );
 }
-
-const linkSx = {
-  fontSize: 13,
-  fontWeight: 600,
-  fontFamily: 'inherit',
-  textDecoration: 'none',
-  '&:hover': { textDecoration: 'underline' },
-} as const;
 
 function Section({
   title,
@@ -682,6 +844,10 @@ function CompatChip({
       </Stack>
     </Tooltip>
   );
+}
+
+function isMagnetLink(text: string): boolean {
+  return /^magnet:\?/i.test(text) && !/\s/.test(text);
 }
 
 function extensionOf(name: string): string {

@@ -46,6 +46,8 @@ export interface LoadVideoOptions {
   duration?: number;
   // File size in bytes, for direct play.
   size?: number;
+  // Subtitle size, for players that draw them (Chromecast); 1 = default.
+  subtitleScale?: number;
 }
 
 export interface Renderer {
@@ -57,6 +59,8 @@ export interface Renderer {
   seek(time: number): Promise<void>;
   getStatus(): Promise<void>;
   onStatus(callback: (status: PlayerStatus) => void): void;
+  // Resizes the subtitles of the loaded video; only where the player draws them (Chromecast).
+  setSubtitleScale?(scale: number): Promise<void>;
 }
 
 // Main → renderer pushes. Hand-written: unlike `MainApi` there is no
@@ -67,6 +71,85 @@ export interface MainEvents {
   updateReady: null;
   // The OS accent colour changed (Windows), as `#rrggbb`.
   accentColor: string;
+  // Swarm progress of every open torrent, once a second while any is open.
+  torrents: TorrentStats[];
+  // What the TV was last sent; null after a disconnect.
+  nowPlaying: NowPlaying | null;
+  // The phone remote pressed Stop: the window stops as if its own button was used.
+  remoteStop: null;
+  // The phone remote pressed Play: the window plays what it has ready on `device`, then
+  // reports back with `api.remoteLaunchDone(requestId, error?)`.
+  remoteLaunch: { requestId: string; device: Device };
+  // The subtitle size changed (from the window or the phone).
+  subtitleScale: number;
+}
+
+// What the window has ready to play and the screen picked, shown on the phone remote.
+export interface RemoteContext {
+  // `details`: the plain-words summary the window shows (episode, subtitles).
+  prepared: { videoPath: string; title: string; details?: string } | null;
+  deviceId: string | null;
+}
+
+// The video loaded on the TV, with the options it was loaded with.
+export interface NowPlaying {
+  videoPath: string;
+  subtitlesPathOrIndex?: string | number;
+  audioIndex?: number;
+  burnSubtitles: boolean;
+  deviceName: string;
+  // Whether the subtitle size can change on the TV: any subtitles playing (a Chromecast
+  // restyles them; on a DLNA TV a size other than Normal burns them in).
+  resizableSubtitles: boolean;
+}
+
+// The tracks of the video playing, raw: the window and the phone label them alike.
+export interface PlayingTracks {
+  deviceType: DeviceType;
+  audio: { language?: string; title?: string; channels?: number }[];
+  subtitles: { language?: string; title?: string; bitmap: boolean }[];
+  // The subtitle file loaded with this video, if any (still offered once switched away).
+  externalName?: string;
+  selected: { audioIndex: number; subtitles: number | 'external' | null };
+  // Seconds the subtitles playing are shifted from their original timing (0: as is).
+  subtitleOffset: number;
+}
+
+// A switch while playing: a subtitle track index, the added file, or none (null);
+// undefined keeps what plays.
+export interface TrackChange {
+  subtitles?: number | 'external' | null;
+  audioIndex?: number;
+}
+
+// The phone remote's switch and the addresses a phone can open it on.
+export interface RemoteInfo {
+  enabled: boolean;
+  links: { address: string; url: string; qrSvg: string }[];
+}
+
+// A video picked for playback: a local file, or a video inside a torrent, whose path
+// is then a loopback URL (see TorrentStore). Either way `path` is what main takes.
+export interface VideoSource {
+  name: string;
+  path: string;
+  size?: number;
+  // Set for torrent videos.
+  infoHash?: string;
+}
+
+export interface TorrentContents {
+  infoHash: string;
+  name: string;
+  videos: { name: string; path: string; size: number }[];
+}
+
+export interface TorrentStats {
+  infoHash: string;
+  peers: number;
+  // Bytes per second.
+  downloadSpeed: number;
+  downloaded: number;
 }
 
 // Mirrors Electron's `nativeTheme.themeSource`.

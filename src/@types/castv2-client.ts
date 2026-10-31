@@ -141,5 +141,6 @@ declare module 'castv2-client' {
     queueRemove(itemIds: any, options: any, callback: Callback<any>): void;
     queueReorder(itemIds: any, options: any, callback: Callback<any>): void;
     queueUpdate(items: any, callback: Callback<any>): void;
+    media: { sessionRequest(data: Record<string, unknown>, callback: Callback<any>): void };
   }
 }

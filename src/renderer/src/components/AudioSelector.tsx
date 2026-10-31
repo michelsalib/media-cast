@@ -1,17 +1,18 @@
 import { CheckRounded } from '@mui/icons-material';
 import { Button, Stack } from '@mui/material';
 import { useEffect, useState } from 'react';
-import { api, pathFor } from '../ipc';
-import { channelsLabel, languageName } from '../labels';
+import type { VideoSource } from '../../../shared/types';
+import { api } from '../ipc';
+import { audioTrackName } from '../labels';
 import { chipSx } from '../theme';
 import type { AudioSelection } from './AudioSelection';
 
 type Props = {
-  videoFile?: File;
+  video?: VideoSource;
   onChange?: (selection: AudioSelection | undefined) => void;
 };
 
-export default function AudioSelector({ videoFile, onChange }: Props): React.JSX.Element | null {
+export default function AudioSelector({ video, onChange }: Props): React.JSX.Element | null {
   const [choices, setChoices] = useState<AudioSelection[]>([]);
   const [choice, setChoice] = useState<AudioSelection | undefined>();
 
@@ -19,22 +20,19 @@ export default function AudioSelector({ videoFile, onChange }: Props): React.JSX
     let cancelled = false;
 
     async function compute(): Promise<void> {
-      if (!videoFile) {
+      if (!video) {
         setChoices([]);
         setChoice(undefined);
         return;
       }
 
-      const probeData = await api.probe(pathFor(videoFile));
+      const probeData = await api.probe(video.path);
       const audio = probeData.streams
         .filter((s) => s.codec_type === 'audio')
         .map(
           (s, i): AudioSelection => ({
             index: i,
-            name:
-              [languageName(s.tags?.language) ?? s.tags?.title, channelsLabel(s.channels)]
-                .filter(Boolean)
-                .join(' · ') || `Track ${i + 1}`,
+            name: audioTrackName({ ...s.tags, channels: s.channels }, i),
           })
         );
 
@@ -51,7 +49,7 @@ export default function AudioSelector({ videoFile, onChange }: Props): React.JSX
     return () => {
       cancelled = true;
     };
-  }, [videoFile]);
+  }, [video]);
 
   useEffect(() => {
     onChange?.(choice);
