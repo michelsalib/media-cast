@@ -9,8 +9,8 @@ import {
 } from '@mui/material';
 import CssBaseline from '@mui/material/CssBaseline';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import logo from '../../../build/icon.svg';
 import type { Device, ThemeSource } from '../../shared/types';
+import AppLogo from './components/AppLogo';
 import { Connector } from './components/Connector';
 import Dropper from './components/Dropper';
 import SettingsMenu from './components/SettingsMenu';
@@ -111,7 +111,7 @@ function App(): React.JSX.Element {
               left: 'env(titlebar-area-x, 0px)',
             }}
           >
-            <Box component="img" src={logo} alt="" sx={{ width: 18, height: 18, mr: 0.5 }} />
+            <AppLogo sx={{ width: 18, height: 18, mr: 0.5 }} />
             <Typography
               sx={{ fontSize: 12, fontWeight: 600, color: 'text.secondary', flexGrow: 1 }}
             >
