@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { extname, join } from 'node:path';
-import { app, type BrowserWindow } from 'electron';
+import { app, type BrowserWindow, powerSaveBlocker } from 'electron';
 import { checkCompat } from '../shared/compat';
 import type { SubtitleCue } from '../shared/subtitleSearch';
 import { isBitmapSubtitleCodec, SUBTITLE_SCALES } from '../shared/subtitles';
@@ -56,6 +56,8 @@ export class PlaybackController {
   private timing?: { videoPath: string; path: string; original: string | number; offset: number };
   private loading = false;
   private polling = false;
+  // While the TV has a video, this computer is what serves it: a sleep would cut it off.
+  private sleepBlocker?: number;
 
   constructor(
     private readonly window: BrowserWindow,
@@ -88,6 +90,7 @@ export class PlaybackController {
     renderer.onStatus((s) => {
       this.lastStatus = { ...s, transcoded: this.currentlyTranscoded };
       this.lastStatusAt = Date.now();
+      this.keepAwake(s.playerState !== 'IDLE');
       sendEvent(this.window, 'status', this.lastStatus);
     });
     try {
@@ -495,7 +498,19 @@ export class PlaybackController {
     await this.teardown();
   }
 
+  // Paused too: the TV keeps its connection to the stream open, and a computer asleep
+  // under a paused video is a video that can't resume. The screen may still turn off.
+  private keepAwake(on: boolean): void {
+    if (on && this.sleepBlocker === undefined) {
+      this.sleepBlocker = powerSaveBlocker.start('prevent-app-suspension');
+    } else if (!on && this.sleepBlocker !== undefined) {
+      powerSaveBlocker.stop(this.sleepBlocker);
+      this.sleepBlocker = undefined;
+    }
+  }
+
   private async teardown(): Promise<void> {
+    this.keepAwake(false);
     if (this.statusInterval) {
       clearInterval(this.statusInterval);
       this.statusInterval = undefined;
