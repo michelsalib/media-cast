@@ -7,7 +7,8 @@
 // Sources:
 //   - win32-x64:   https://github.com/GyanD/codexffmpeg (release-essentials, static GPL)
 //   - darwin-*:    https://evermeet.cx/ffmpeg/ (x86_64 only; runs under Rosetta on arm64)
-//   - linux-x64:   https://johnvansickle.com/ffmpeg/ (release static)
+// Windows and macOS only, the systems Media Cast is released for. Elsewhere the app falls
+// back to the ffmpeg on PATH.
 import { spawnSync } from 'node:child_process';
 import {
   chmodSync,
@@ -143,17 +144,6 @@ try {
     await download(await evermeetZip('ffprobe'), fpZip);
     extract(ffZip, tmp);
     extract(fpZip, tmp);
-    const ff = findFile(tmp, 'ffmpeg');
-    const fp = findFile(tmp, 'ffprobe');
-    if (!ff || !fp) throw new Error('Could not locate ffmpeg / ffprobe in archive');
-    install(ff, fp);
-  } else if (platform === 'linux' && arch === 'x64') {
-    const archive = join(tmp, 'ffmpeg.tar.xz');
-    await download(
-      'https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz',
-      archive
-    );
-    extract(archive, tmp);
     const ff = findFile(tmp, 'ffmpeg');
     const fp = findFile(tmp, 'ffprobe');
     if (!ff || !fp) throw new Error('Could not locate ffmpeg / ffprobe in archive');

@@ -4,7 +4,7 @@
   "description": "An Electron application with React and TypeScript",
   "main": "./out/main/index.js",
   "author": "example.com",
-  "homepage": "https://electron-vite.org",
+  "homepage": "https://micheldev.com/media-cast",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/michelsalib/media-cast.git"
@@ -30,7 +30,6 @@
     "build:unpack": "bun run build && electron-builder --dir",
     "build:win": "bun run build && electron-builder --win",
     "build:mac": "bun run build && electron-builder --mac --universal",
-    "build:linux": "bun run build && electron-builder --linux",
     "postversion": "git push --follow-tags"
   },
   "dependencies": {

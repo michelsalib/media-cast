@@ -10,7 +10,7 @@ No TV-side setup. No media library to configure. No account. Works with **Chrome
 
 [![Latest release](https://img.shields.io/github/v/release/michelsalib/media-cast?style=flat-square)](https://github.com/michelsalib/media-cast/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/michelsalib/media-cast/total?style=flat-square)](https://github.com/michelsalib/media-cast/releases)
-![Platforms](https://img.shields.io/badge/platforms-windows%20%7C%20macos%20%7C%20linux-blue?style=flat-square)
+![Platforms](https://img.shields.io/badge/platforms-windows%20%7C%20macos-blue?style=flat-square)
 [![Electron](https://img.shields.io/github/package-json/dependency-version/michelsalib/media-cast/dev/electron?style=flat-square&label=electron&color=47848f&logo=electron&logoColor=white)](https://www.electronjs.org/)
 
 </div>
@@ -36,9 +36,8 @@ No TV-side setup. No media library to configure. No account. Works with **Chrome
 |---|---|
 | Windows | `.exe` installer |
 | macOS | `.dmg` (universal — Intel + Apple Silicon) |
-| Linux | `.AppImage` |
 
-Requires Windows 10/11 (64-bit), macOS 13 (Ventura) or later, or Linux x64.
+Requires Windows 10/11 (64-bit) or macOS 13 (Ventura) or later.
 
 All builds are on the **[Releases page](https://github.com/michelsalib/media-cast/releases/latest)** — the badge above always points to the latest version. Auto-updates are built in, so once installed you'll be notified of new versions.
 
@@ -64,7 +63,6 @@ Produce installers:
 ```bash
 bun run build:win     # Windows
 bun run build:mac     # macOS (universal)
-bun run build:linux   # Linux
 ```
 
 **Tooling:** [electron-vite](https://electron-vite.org/) · [Biome](https://biomejs.dev/) (lint + format) · TypeScript 7 native `tsc` (typecheck). See [CLAUDE.md](CLAUDE.md) for an architecture overview.

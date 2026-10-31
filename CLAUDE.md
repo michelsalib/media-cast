@@ -13,7 +13,7 @@ bun run dev               # electron-vite dev (HMR for main/preload/renderer)
 bun run typecheck         # both projects; TypeScript 7 native `tsc`
 bun run check             # biome lint + format --write
 bun run prepare:binaries  # fetch static ffmpeg/ffprobe into resources/bin/<platform>-<arch>/
-bun run build:{win,mac,linux}  # runs typecheck → electron-vite build → electron-builder
+bun run build:{win,mac}  # runs typecheck → electron-vite build → electron-builder
 ```
 
 No tests. `build` aborts on typecheck failure. Biome (not ESLint/Prettier) — see `biome.json`. TS root is references-only; edit `tsconfig.node.json` (main+preload+scripts) or `tsconfig.web.json` (renderer). Electron 44+: macOS 13+ and 64-bit Windows only.
