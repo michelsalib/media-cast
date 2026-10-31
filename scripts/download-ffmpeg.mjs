@@ -78,6 +78,16 @@ async function findGitHubAsset(repo, namePattern) {
   return asset.browser_download_url;
 }
 
+// The versioned zip of evermeet's latest release. Its "getrelease" redirect answers
+// 410 Gone since Oct 2026; the info API still names the file.
+async function evermeetZip(tool) {
+  const res = await fetch(`https://evermeet.cx/ffmpeg/info/${tool}/release`);
+  if (!res.ok) throw new Error(`evermeet info ${res.status} for ${tool}`);
+  const url = (await res.json()).download?.zip?.url;
+  if (!url) throw new Error(`No zip download in evermeet info for ${tool}`);
+  return url;
+}
+
 function extract(archive, dest) {
   // GNU tar (often first on PATH in Git Bash) cannot unzip. The libarchive-based
   // tar.exe shipped in Windows System32 does, so address it explicitly.
@@ -129,8 +139,8 @@ try {
   } else if (platform === 'darwin') {
     const ffZip = join(tmp, 'ffmpeg.zip');
     const fpZip = join(tmp, 'ffprobe.zip');
-    await download('https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip', ffZip);
-    await download('https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip', fpZip);
+    await download(await evermeetZip('ffmpeg'), ffZip);
+    await download(await evermeetZip('ffprobe'), fpZip);
     extract(ffZip, tmp);
     extract(fpZip, tmp);
     const ff = findFile(tmp, 'ffmpeg');
