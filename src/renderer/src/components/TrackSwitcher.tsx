@@ -1,16 +1,15 @@
 import { CheckRounded } from '@mui/icons-material';
 import { Button, CircularProgress, Stack, Tooltip, Typography } from '@mui/material';
 import { useState } from 'react';
-import type { PlayingTracks, TrackChange } from '../../../shared/types';
-import { audioTrackName, subtitleTrackName } from '../labels';
+import type { PlayingTracks, SubtitleChoice, TrackChange } from '../../../shared/types';
+import { audioTrackName, subtitleFileName, subtitleTrackName } from '../labels';
 import { chipSx } from '../theme';
+import SubtitleChoices, { type SubtitleOption } from './SubtitleChoices';
 
 type Props = {
   tracks: PlayingTracks;
   onChange: (change: TrackChange) => Promise<void>;
 };
-
-type SubtitleChoice = PlayingTracks['selected']['subtitles'];
 
 // Audio and subtitles of the video playing. A TV reads both only at load, so a switch
 // reloads the video where it was. The same in the window and on the phone remote.
@@ -27,23 +26,35 @@ export default function TrackSwitcher({ tracks, onChange }: Props): React.JSX.El
     }
   }
 
-  const subtitleChoices: { value: SubtitleChoice; label: string; hint?: string; off?: boolean }[] =
-    [
-      ...(tracks.externalName
-        ? [{ value: 'external' as const, label: 'Added subtitles', hint: tracks.externalName }]
-        : []),
-      ...tracks.subtitles.map((s, i) => ({
-        value: i,
-        label: subtitleTrackName(s, i),
-        // Chromecast plays the file as is, with a text sidecar: no way to show images.
-        off: s.bitmap && tracks.deviceType === 'chromecast',
-        hint:
-          s.bitmap && tracks.deviceType === 'chromecast'
-            ? 'Image subtitles can’t be shown on a Chromecast'
-            : undefined,
-      })),
-      { value: null, label: 'Off' },
-    ];
+  const subtitleChoices: (SubtitleOption & { value: SubtitleChoice })[] = [
+    ...(tracks.externalName
+      ? [
+          {
+            value: 'external' as const,
+            label: 'Added subtitles',
+            detail: tracks.externalName,
+          },
+        ]
+      : []),
+    ...tracks.subtitles.map((s, i) => ({
+      value: i,
+      label: subtitleTrackName(s, i),
+      group: 'In the video',
+      // Chromecast plays the file as is, with a text sidecar: no way to show images.
+      disabled: s.bitmap && tracks.deviceType === 'chromecast',
+      hint:
+        s.bitmap && tracks.deviceType === 'chromecast'
+          ? 'Image subtitles can’t be shown on a Chromecast'
+          : undefined,
+    })),
+    ...tracks.files.map((f, i) => ({
+      value: `file:${i}` as const,
+      label: subtitleFileName(f.label),
+      group: 'In the torrent',
+      detail: f.folder ? `${f.folder}/${f.name}` : f.name,
+    })),
+    { value: null, label: 'Off' },
+  ].map((c) => ({ ...c, key: String(c.value) }));
 
   return (
     <Stack spacing={1.5}>
@@ -63,17 +74,16 @@ export default function TrackSwitcher({ tracks, onChange }: Props): React.JSX.El
         </Group>
       )}
       <Group title="Subtitles">
-        {subtitleChoices.map((c) => (
-          <Choice
-            key={String(c.value)}
-            label={c.label}
-            hint={c.hint}
-            selected={tracks.selected.subtitles === c.value}
-            loading={pending?.subtitles === c.value}
-            disabled={!!pending || c.off}
-            onClick={() => void change({ subtitles: c.value })}
-          />
-        ))}
+        <SubtitleChoices
+          options={subtitleChoices}
+          selected={String(tracks.selected.subtitles)}
+          loading={pending?.subtitles !== undefined ? String(pending.subtitles) : undefined}
+          disabled={!!pending}
+          onPick={(key) => {
+            const choice = subtitleChoices.find((c) => c.key === key);
+            if (choice) void change({ subtitles: choice.value });
+          }}
+        />
       </Group>
       <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>
         Switching reloads the video on the TV and picks up where it was.

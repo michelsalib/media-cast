@@ -35,7 +35,7 @@ import type {
 } from '../../../shared/types';
 import type { Connection } from '../App';
 import { api, errorMessage, onEvent, pathFor } from '../ipc';
-import { episodeLabel, resolutionLabel, runtimeLabel } from '../labels';
+import { episodeLabel, resolutionLabel, runtimeLabel, subtitleFileName } from '../labels';
 import { cardSx, linkSx, tonalSx } from '../theme';
 import { Artwork, useObjectUrl } from './Artwork';
 import type { AudioSelection } from './AudioSelection';
@@ -83,6 +83,8 @@ export default function Dropper({
   const [resizableSubtitles, setResizableSubtitles] = useState(false);
   const [subtitleScale, setSubtitleScale] = useState(1);
   const [subs, setSubs] = useState<SubtitlesFile | undefined>();
+  // The subtitle files in the torrent of the video picked.
+  const [torrentSubs, setTorrentSubs] = useState<SubtitlesFile[]>([]);
   const [subtitlesSelection, setSubtitlesSelection] = useState<SubtitlesSelection>(NO_SUBTITLES);
   const [audioSelection, setAudioSelection] = useState<AudioSelection | undefined>();
   const [thumbnail, setThumbnail] = useState<Uint8Array | undefined>(undefined);
@@ -118,6 +120,8 @@ export default function Dropper({
   // For the listeners registered once.
   const videoPathRef = useRef(videoPath);
   videoPathRef.current = videoPath;
+  const torrentSubsRef = useRef(torrentSubs);
+  torrentSubsRef.current = torrentSubs;
   const statsFor = (infoHash?: string): TorrentStats | undefined =>
     torrentStats.find((s) => s.infoHash === infoHash);
   // Text tracks only: image subtitles have no lines to show or retime.
@@ -145,6 +149,8 @@ export default function Dropper({
         setResizableSubtitles(!!now?.resizableSubtitles);
         const path = now?.subtitlesPathOrIndex;
         if (now?.videoPath !== videoPathRef.current || typeof path !== 'string') return;
+        // Already offered with the torrent.
+        if (torrentSubsRef.current.some((s) => s.path === path)) return;
         setSubs((prev) =>
           prev?.path === path ? prev : { name: path.split(/[\\/]/).pop() ?? path, path }
         );
@@ -291,6 +297,23 @@ export default function Dropper({
   }, [video]);
 
   useEffect(() => {
+    setTorrentSubs([]);
+    if (!video?.infoHash) return;
+    let cancelled = false;
+    api
+      .torrentSubtitles(video.path)
+      .then(
+        (files) =>
+          !cancelled &&
+          setTorrentSubs(files.map((f) => ({ ...f, label: subtitleFileName(f.label) })))
+      )
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [video]);
+
+  useEffect(() => {
     if (!videoPath) {
       setRelease(undefined);
       return;
@@ -335,7 +358,9 @@ export default function Dropper({
     subtitlesSelection.type === 'internal'
       ? `${subtitlesSelection.name} subtitles`
       : subtitlesSelection.type === 'external'
-        ? 'Added subtitles'
+        ? subtitlesSelection.label
+          ? `${subtitlesSelection.label} subtitles`
+          : 'Added subtitles'
         : undefined;
 
   const canPlay = !!video && !!device && !casting && connection?.state !== 'CONNECTING';
@@ -598,6 +623,8 @@ export default function Dropper({
                 >
                   <SubtitlesSelector
                     subFile={subs}
+                    bundled={torrentSubs}
+                    onError={setCastError}
                     video={video}
                     deviceType={device?.type}
                     onChange={setSubtitlesSelection}

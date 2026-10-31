@@ -105,7 +105,8 @@ function trackChange(value: unknown): TrackChange {
     subtitles !== undefined &&
     subtitles !== null &&
     subtitles !== 'external' &&
-    !index(subtitles)
+    !index(subtitles) &&
+    !(typeof subtitles === 'string' && /^file:\d+$/.test(subtitles))
   ) {
     throw new Error('Bad subtitle choice');
   }

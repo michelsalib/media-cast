@@ -81,6 +81,14 @@ export function audioTrackName(
   );
 }
 
+// A torrent's subtitle file, from what sets it apart ("English", "en forced" → "English
+// forced"); a file named after the video alone is just "Subtitles".
+export function subtitleFileName(label: string): string {
+  const [first, ...rest] = label.split(' ');
+  const lang = /^[a-z]{2,3}$/i.test(first) ? languageName(first.toLowerCase()) : undefined;
+  return (lang ? [lang, ...rest].join(' ') : label) || 'Subtitles';
+}
+
 // "English", "English · SDH", or the track title alone when it already names the language.
 export function subtitleTrackName(track: { language?: string; title?: string }, i: number): string {
   const lang = languageName(track.language);

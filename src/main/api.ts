@@ -75,6 +75,10 @@ export function createMainApi({
       torrents.prune([contents.videos[0].path, playingVideoPath(), keepVideoPath]);
       return contents;
     },
+    // The subtitle files in a torrent video's torrent, listed; one is downloaded to its
+    // `path` by fetchTorrentSubtitles before use.
+    torrentSubtitles: (videoPath: string) => torrents.subtitlesOf(videoPath),
+    fetchTorrentSubtitles: (path: string) => torrents.fetchSubtitles(path),
     probe: (videoPath: string) => probe(videoPath),
     thumbnail: (videoPath: string, width?: number) => thumbnail(videoPath, width),
     connect: (deviceId: string) => controller.connect(deviceId),

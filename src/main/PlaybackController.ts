@@ -24,6 +24,7 @@ import {
 import type { MediaServer } from './MediaServer';
 import { detectSubtitleCharenc, extractSubtitles } from './subtitleExtractor';
 import { retimeSubtitles, subtitleCues } from './subtitles/search';
+import type { TorrentStore } from './torrents';
 import type { UpnpDevice } from './upnp/DevicesScanner';
 import { UpnpPlayer } from './upnp/Player';
 import { sourceName } from './videoSource';
@@ -58,7 +59,8 @@ export class PlaybackController {
   constructor(
     private readonly window: BrowserWindow,
     private readonly server: MediaServer,
-    private readonly devices: () => ReadonlyMap<string, KnownDevice>
+    private readonly devices: () => ReadonlyMap<string, KnownDevice>,
+    private readonly torrents: Pick<TorrentStore, 'subtitlesOf' | 'fetchSubtitles'>
   ) {}
 
   async connect(deviceId: string): Promise<void> {
@@ -153,7 +155,12 @@ export class PlaybackController {
         deviceName: this.currentDevice.name,
         resizableSubtitles,
       };
-      if (typeof subtitlesPathOrIndex === 'string' && subtitlesPathOrIndex !== this.timing?.path) {
+      // A file of the torrent stays offered with the others, not as the added one.
+      if (
+        typeof subtitlesPathOrIndex === 'string' &&
+        subtitlesPathOrIndex !== this.timing?.path &&
+        !this.torrents.subtitlesOf(videoPath).some((f) => f.path === subtitlesPathOrIndex)
+      ) {
         this.external = { videoPath, path: subtitlesPathOrIndex };
       }
       sendEvent(this.window, 'nowPlaying', this.current);
@@ -211,6 +218,8 @@ export class PlaybackController {
     // A retimed copy is shown as the track it was made from.
     const { source: subs, offset } = this.subtitleTiming(current);
     const external = this.externalFor(current.videoPath);
+    const files = this.torrents.subtitlesOf(current.videoPath);
+    const file = files.findIndex((f) => f.path === subs);
     return {
       deviceType: this.currentDevice?.type ?? 'upnp',
       audio: data.streams
@@ -224,9 +233,17 @@ export class PlaybackController {
           bitmap: isBitmapSubtitleCodec(s.codec_name),
         })),
       externalName: external && basename(external),
+      files: files.map(({ path: _, ...f }) => f),
       selected: {
         audioIndex: current.audioIndex ?? 0,
-        subtitles: typeof subs === 'number' ? subs : subs !== undefined ? 'external' : null,
+        subtitles:
+          typeof subs === 'number'
+            ? subs
+            : file >= 0
+              ? `file:${file}`
+              : subs !== undefined
+                ? 'external'
+                : null,
       },
       subtitleOffset: offset,
     };
@@ -242,6 +259,10 @@ export class PlaybackController {
       const external = this.externalFor(current.videoPath);
       if (!external) throw new Error('No subtitle file was added to this video');
       subtitlesPathOrIndex = external;
+    } else if (typeof change.subtitles === 'string') {
+      const file = this.torrents.subtitlesOf(current.videoPath)[Number(change.subtitles.slice(5))];
+      if (!file) throw new Error('Unknown subtitle file');
+      subtitlesPathOrIndex = await this.torrents.fetchSubtitles(file.path);
     } else if (typeof change.subtitles === 'number') {
       const stream = (await probe(current.videoPath)).streams.filter(
         (s) => s.codec_type === 'subtitle'

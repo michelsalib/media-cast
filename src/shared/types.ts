@@ -110,15 +110,20 @@ export interface PlayingTracks {
   subtitles: { language?: string; title?: string; bitmap: boolean }[];
   // The subtitle file loaded with this video, if any (still offered once switched away).
   externalName?: string;
-  selected: { audioIndex: number; subtitles: number | 'external' | null };
+  // The subtitle files in the video's torrent (no paths: the phone sees this too).
+  files: Omit<TorrentSubtitles, 'path'>[];
+  selected: { audioIndex: number; subtitles: SubtitleChoice };
   // Seconds the subtitles playing are shifted from their original timing (0: as is).
   subtitleOffset: number;
 }
 
-// A switch while playing: a subtitle track index, the added file, or none (null);
-// undefined keeps what plays.
+// Subtitles while playing: a track index, the added file, a file of the torrent (by index
+// in `PlayingTracks.files`), or none.
+export type SubtitleChoice = number | 'external' | `file:${number}` | null;
+
+// A switch while playing; undefined keeps what plays.
 export interface TrackChange {
-  subtitles?: number | 'external' | null;
+  subtitles?: SubtitleChoice;
   audioIndex?: number;
 }
 
@@ -142,6 +147,16 @@ export interface TorrentContents {
   infoHash: string;
   name: string;
   videos: { name: string; path: string; size: number }[];
+}
+
+// A subtitle file in a torrent. `label` is its name without the video's or a numbering
+// ("English", "en forced"), possibly empty; `folder` where it is in the torrent ("" at
+// the top). `path` is the local file it is downloaded to by `api.fetchTorrentSubtitles`.
+export interface TorrentSubtitles {
+  name: string;
+  path: string;
+  label: string;
+  folder: string;
 }
 
 export interface TorrentStats {

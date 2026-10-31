@@ -122,7 +122,7 @@ app.whenReady().then(() => {
   }, 1000);
 
   const knownDevices = new Map<string, KnownDevice>();
-  const controller = new PlaybackController(mainWindow, server, () => knownDevices);
+  const controller = new PlaybackController(mainWindow, server, () => knownDevices, torrents);
 
   function listDevices(): Device[] {
     return [...knownDevices.values()].map((d) => ({

@@ -7,11 +7,15 @@ export type SubtitlesSelection =
   // `bitmap`: image-based track (PGS, VobSub…) — can only be shown by burning in.
   | { type: 'internal'; index: number; name: string; bitmap: boolean }
   // `path`: a dropped sidecar, or a file main downloaded/resynced into its cache.
-  | { type: 'external'; name: string; path: string }
+  // `label`: set for the files that came with a torrent.
+  | { type: 'external'; name: string; path: string; label?: string }
   | { type: 'no subtitles'; name: 'No subtitles' };
 
 // An external subtitle file known by path (File objects can't name main's cache files).
 export interface SubtitlesFile {
   name: string;
   path: string;
+  // For the files of a torrent: what sets it apart, and where it is in the torrent.
+  label?: string;
+  folder?: string;
 }
