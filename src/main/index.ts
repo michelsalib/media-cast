@@ -32,6 +32,7 @@ import { PreviewServer } from './PreviewServer';
 import { createRemoteApi } from './remote/api';
 import { RemoteHub } from './remote/RemoteHub';
 import { RemoteServer } from './remote/RemoteServer';
+import { openedItems, refreshShellIntegration } from './shellIntegration';
 import { TorrentStore } from './torrents';
 import { type UpnpDevice, UpnpDevicesScanner } from './upnp/DevicesScanner';
 
@@ -107,10 +108,18 @@ app.whenReady().then(() => {
       .catch((err) => console.error('update check failed:', err));
   }
 
-  app.on('second-instance', () => {
+  // Explorer (Open with, the Cast verb, Send to) starts the exe with file paths; a second
+  // instance hands its command line over here. The window takes them when it is ready.
+  let openedQueue = openedItems(process.argv);
+  app.on('second-instance', (_event, argv) => {
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.focus();
+    const items = openedItems(argv);
+    if (items.length === 0) return;
+    openedQueue.push(...items);
+    sendEvent(mainWindow, 'opened', null);
   });
+  refreshShellIntegration().catch((err) => console.error('shell integration refresh:', err));
 
   const chromecastScanner = new ChromecastDevicesScanner();
   const upnpScanner = new UpnpDevicesScanner();
@@ -158,7 +167,14 @@ app.whenReady().then(() => {
   const scanners: DevicesScanner[] = [chromecastScanner, upnpScanner];
   const hub = new RemoteHub(mainWindow);
   const remote = new RemoteServer(
-    createRemoteApi({ window: mainWindow, controller, preview, hub, devices: listDevices }),
+    createRemoteApi({
+      window: mainWindow,
+      controller,
+      preview,
+      hub,
+      devices: listDevices,
+      scanners,
+    }),
     controller,
     preview,
     hub
@@ -175,6 +191,11 @@ app.whenReady().then(() => {
       playingVideoPath: () => server.videoPath,
       scanners,
       updater: autoUpdater,
+      takeOpenedItems: () => {
+        const items = openedQueue;
+        openedQueue = [];
+        return items;
+      },
     })
   );
 

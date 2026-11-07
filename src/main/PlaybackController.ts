@@ -325,6 +325,14 @@ export class PlaybackController {
     await this.reloadAt({ subtitlesPathOrIndex: saved.path });
   }
 
+  // Plays a subtitle file found online (window or phone) with the video playing, as the
+  // added one, reloaded where it was.
+  async playSubtitleFile(path: string): Promise<void> {
+    this.playing();
+    this.timing = undefined;
+    await this.reloadAt({ subtitlesPathOrIndex: path });
+  }
+
   // The subtitles behind what plays, and their shift: a retimed copy maps back to its source.
   private subtitleTiming(current: NowPlaying): {
     source: string | number | undefined;

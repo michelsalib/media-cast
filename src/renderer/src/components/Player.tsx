@@ -1,5 +1,5 @@
-import { StopRounded, SyncRounded, VideoLibraryOutlined } from '@mui/icons-material';
-import { Box, Button, Slider, Stack, Tooltip, Typography } from '@mui/material';
+import { StopRounded, VideoLibraryOutlined } from '@mui/icons-material';
+import { Box, Button, Slider, Stack, Typography } from '@mui/material';
 import format from 'format-duration';
 import { useReducer, useState } from 'react';
 import type { Device, PlayerStatus } from '../../../shared/types';
@@ -7,9 +7,11 @@ import { api } from '../ipc';
 import { SeekHold } from '../seekHold';
 import { cardSx, tonalSx } from '../theme';
 import { Artwork } from './Artwork';
+import { ConvertingChip } from './CompatChip';
 import PlayingOptionsButton from './PlayingOptionsButton';
 import PlayPause from './PlayPauseSeek';
 import RemoteButton from './RemoteButton';
+import VideoInfoButton from './VideoInfoButton';
 
 type Props = {
   status: PlayerStatus;
@@ -24,6 +26,12 @@ type Props = {
   onBrowse: () => void;
   onStop: () => void;
 };
+
+async function probePlaying() {
+  const path = await api.playingPath();
+  if (!path) throw new Error('Nothing is playing');
+  return api.probe(path);
+}
 
 const STATE_LABELS: Record<PlayerStatus['playerState'], string> = {
   PLAYING: 'Playing on',
@@ -100,27 +108,8 @@ export default function Player({
                 {STATE_LABELS[status.playerState]} {device.name}
               </Box>
             </Stack>
-            {status.transcoded && (
-              <Tooltip title="ffmpeg is re-encoding this file on the fly for the TV">
-                <Stack
-                  direction="row"
-                  spacing={0.75}
-                  sx={{
-                    height: 32,
-                    px: 1.5,
-                    alignItems: 'center',
-                    borderRadius: '8px',
-                    bgcolor: 'tonal.secondaryContainer',
-                    color: 'tonal.onSecondaryContainer',
-                    fontSize: 13,
-                    fontWeight: 500,
-                  }}
-                >
-                  <SyncRounded sx={{ fontSize: 16 }} />
-                  <span>Converting</span>
-                </Stack>
-              </Tooltip>
-            )}
+            {status.transcoded && <ConvertingChip />}
+            <VideoInfoButton load={probePlaying} videoKey={title} name={title} />
             {badges}
           </Stack>
           <Typography

@@ -8,12 +8,22 @@ import { sendEvent } from '../api';
 const LAUNCH_TIMEOUT_MS = 180_000;
 // A pick is instant, unless it's a torrent's subtitle file still to download.
 const TRACKS_TIMEOUT_MS = 60_000;
+// Fetching a torrent's file list waits for peers to turn up.
+const OPEN_TIMEOUT_MS = 150_000;
+
+type Request =
+  'remoteLaunch' | 'remoteTracks' | 'remoteOpen' | 'remoteTorrentPick' | 'remoteAddSubtitles';
 
 // Between the window and the phone remote. The window owns what is ready to play (video,
 // subtitles, audio, burn-in) and the connection state, so it reports its context here and
 // a phone's Play or track pick is handed back to it to run exactly like its own.
 export class RemoteHub {
-  private context: RemoteContext = { prepared: null, deviceId: null };
+  private context: RemoteContext = {
+    prepared: null,
+    deviceId: null,
+    torrentChoice: null,
+    openingTorrent: false,
+  };
   // Names the video ready: a phone acts on the one it was shown, never on one picked since.
   private preparedId?: string;
   private readonly listeners = new Set<() => void>();
@@ -74,6 +84,33 @@ export class RemoteHub {
     }));
   }
 
+  // Subtitles found online or retimed from the phone, added to what is ready.
+  addSubtitles(file: { name: string; path: string }): Promise<void> {
+    const videoPath = this.readyPath();
+    return this.request('remoteAddSubtitles', TRACKS_TIMEOUT_MS, (requestId) => ({
+      requestId,
+      videoPath,
+      file,
+    }));
+  }
+
+  // A magnet link the window opens as if pasted there (main checked its shape).
+  openTorrent(link: string): Promise<void> {
+    return this.request('remoteOpen', OPEN_TIMEOUT_MS, (requestId) => ({ requestId, link }));
+  }
+
+  // Video `index` of the torrent the window offers to pick from, if still that one.
+  pickTorrentVideo(infoHash: string, index: number): Promise<void> {
+    if (this.context.torrentChoice?.infoHash !== infoHash) {
+      throw new Error('The computer isn’t offering that torrent anymore');
+    }
+    return this.request('remoteTorrentPick', TRACKS_TIMEOUT_MS, (requestId) => ({
+      requestId,
+      infoHash,
+      index,
+    }));
+  }
+
   private readyPath(): string {
     const prepared = this.context.prepared;
     if (!prepared) throw new Error('Nothing is ready on the computer');
@@ -96,7 +133,7 @@ export class RemoteHub {
     }
   }
 
-  private request<K extends 'remoteLaunch' | 'remoteTracks'>(
+  private request<K extends Request>(
     channel: K,
     timeoutMs: number,
     payload: (requestId: string) => MainEvents[K]

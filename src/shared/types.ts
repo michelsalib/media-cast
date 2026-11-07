@@ -1,3 +1,5 @@
+import type { CompatReport } from './compat';
+
 export type PlayerState = 'IDLE' | 'PLAYING' | 'PAUSED' | 'BUFFERING';
 
 export interface PlayerStatus {
@@ -86,15 +88,50 @@ export interface MainEvents {
   remoteTracks: { requestId: string; videoPath: string; change: TrackChange };
   // The subtitle size changed (from the window or the phone).
   subtitleScale: number;
+  // Explorer opened files with the app: fetch them with `api.takeOpenedItems()`.
+  opened: null;
+  // The phone remote sent a magnet link: the window opens it as if pasted there.
+  remoteOpen: { requestId: string; link: string };
+  // The phone remote picked video `index` of the torrent the window offers to pick from.
+  remoteTorrentPick: { requestId: string; infoHash: string; index: number };
+  // Subtitles found online or retimed from the phone, for the video the window has ready:
+  // added as if dropped there.
+  remoteAddSubtitles: {
+    requestId: string;
+    videoPath: string;
+    file: { name: string; path: string };
+  };
 }
 
 // What the window has ready to play and the screen picked, shown on the phone remote.
 export interface RemoteContext {
   // `details`: the plain-words summary the window shows (episode, subtitles). `tracks`:
-  // what can be picked and what is, once the window has probed the video.
-  prepared: { videoPath: string; title: string; details?: string; tracks?: TrackList } | null;
+  // what can be picked and what is, once the window has probed the video; with `burn`
+  // and `normalizeAudio`, as a DLNA TV would get them. `subtitles`/`audioIndex`: what is
+  // picked, for retiming from the phone (main only: the phone never sees paths).
+  // `compat`: how it would play on the screen picked in the window (`deviceId`).
+  prepared: {
+    videoPath: string;
+    title: string;
+    details?: string;
+    tracks?: ReadyTracks;
+    subtitles?: string | number;
+    audioIndex?: number;
+    compat?: CompatReport;
+  } | null;
   deviceId: string | null;
+  // A torrent with several videos the window is offering to pick from.
+  torrentChoice: {
+    infoHash: string;
+    name: string;
+    videos: { name: string; size: number }[];
+  } | null;
+  // A torrent is being opened (its file list fetched).
+  openingTorrent: boolean;
 }
+
+// The tracks of the video ready, with the DLNA-only switches as they would apply.
+export type ReadyTracks = TrackList & Pick<PlayingTracks, 'burn' | 'normalizeAudio'>;
 
 // The video loaded on the TV, with the options it was loaded with.
 export interface NowPlaying {
@@ -195,4 +232,19 @@ export interface Appearance {
   themeSource: ThemeSource;
   // `#rrggbb`; undefined where the OS has no accent colour (Linux).
   accentColor?: string;
+}
+
+// Windows Explorer entries for videos and torrents (see shellIntegration.ts).
+export interface ShellIntegration {
+  openWith: boolean;
+  contextMenu: boolean;
+  sendTo: boolean;
+}
+export type ShellIntegrationKey = keyof ShellIntegration;
+
+// A file the app was opened with (Explorer), or a magnet link (then `name` = `path`).
+export interface OpenedItem {
+  name: string;
+  path: string;
+  size?: number;
 }

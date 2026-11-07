@@ -1,4 +1,4 @@
-import { SubtitlesOutlined } from '@mui/icons-material';
+import { SearchRounded, SubtitlesOutlined } from '@mui/icons-material';
 import {
   Alert,
   Button,
@@ -10,13 +10,15 @@ import {
   Stack,
   Typography,
 } from '@mui/material';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { SubtitleCue } from '../../../shared/subtitleSearch';
 import type { PlayingTracks, TrackChange } from '../../../shared/types';
 import { api, errorMessage, onEvent } from '../ipc';
 import { usePlaybackTime } from '../playbackTime';
 import { tonalSx } from '../theme';
 import LiveSubtitles from './LiveSubtitles';
+import SubtitleSearchDialog from './SubtitleSearchDialog';
+import type { SubtitleSearchBackend } from './subtitleBackends';
 import TrackSwitcher from './TrackSwitcher';
 
 type Props = {
@@ -39,6 +41,9 @@ export default function PlayingOptionsButton({
   const [offset, setOffset] = useState(0);
   const [scale, setScale] = useState(1);
   const [error, setError] = useState<string>();
+  const [searchOpen, setSearchOpen] = useState(false);
+  // Subtitles found online for the video playing: played with it straight away.
+  const search = useMemo(() => playingSearch(() => setSearchOpen(false)), []);
   const time = usePlaybackTime(position, playing);
 
   const load = useCallback(async () => {
@@ -91,11 +96,20 @@ export default function PlayingOptionsButton({
           <Stack spacing={2.5} sx={{ pt: 0.5 }}>
             {error && <Alert severity="error">{error}</Alert>}
             {tracks ? (
-              <TrackSwitcher
-                tracks={tracks}
-                deviceType={tracks.deviceType}
-                onChange={(change: TrackChange) => run(() => api.changeTracks(change))}
-              />
+              <>
+                <TrackSwitcher
+                  tracks={tracks}
+                  deviceType={tracks.deviceType}
+                  onChange={(change: TrackChange) => run(() => api.changeTracks(change))}
+                />
+                <Button
+                  startIcon={<SearchRounded />}
+                  onClick={() => setSearchOpen(true)}
+                  sx={[tonalSx, { alignSelf: 'flex-start' }]}
+                >
+                  Find subtitles online
+                </Button>
+              </>
             ) : (
               <Typography sx={{ color: 'text.secondary' }}>Loading…</Typography>
             )}
@@ -123,6 +137,36 @@ export default function PlayingOptionsButton({
           <Button onClick={() => setOpen(false)}>Close</Button>
         </DialogActions>
       </Dialog>
+      <SubtitleSearchDialog
+        open={searchOpen}
+        backend={search}
+        onClose={() => setSearchOpen(false)}
+      />
     </>
   );
+}
+
+async function playingPath(): Promise<string> {
+  const path = await api.playingPath();
+  if (!path) throw new Error('Nothing is playing');
+  return path;
+}
+
+function playingSearch(onUsed: () => void): SubtitleSearchBackend {
+  return {
+    settings: true,
+    guess: async () => {
+      const [guess, settings] = await Promise.all([
+        playingPath().then((path) => api.guessSubtitleQuery(path)),
+        api.subtitleSettings(),
+      ]);
+      return { guess, languages: settings.languages };
+    },
+    search: async (query) => api.searchSubtitles(await playingPath(), query),
+    download: async (result, episode) => {
+      const file = await api.downloadSubtitle(result, episode);
+      await api.playSubtitleFile(file.path);
+      onUsed();
+    },
+  };
 }

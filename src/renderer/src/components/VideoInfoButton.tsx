@@ -10,26 +10,31 @@ import {
 } from '@mui/material';
 import { useRef, useState } from 'react';
 import type { FFProbeData } from '../../../main/ffmpeg';
-import type { VideoSource } from '../../../shared/types';
-import { api } from '../ipc';
 import { formatBytes } from '../labels';
 
 interface Props {
-  video: VideoSource;
+  // Probes the video: the window by path, the phone through the remote API.
+  load: () => Promise<FFProbeData>;
+  // Which video: a new one is probed again.
+  videoKey: string;
+  // The file name, shown on top.
+  name: string;
   sx?: SxProps<Theme>;
 }
 
-export default function VideoInfoButton({ video, sx }: Props): React.JSX.Element {
+// Codecs, bitrates and streams of the video ready or playing, in the window and on the
+// phone remote.
+export default function VideoInfoButton({ load, videoKey, name, sx }: Props): React.JSX.Element {
   const anchorRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const [info, setInfo] = useState<FFProbeData>();
   const [error, setError] = useState<string>();
-  const [lastVideo, setLastVideo] = useState(video);
+  const [lastVideo, setLastVideo] = useState(videoKey);
 
   // Render-phase reset of cached probe data when the video prop changes.
   // https://react.dev/learn/you-might-not-need-an-effect#resetting-all-state-when-a-prop-changes
-  if (lastVideo !== video) {
-    setLastVideo(video);
+  if (lastVideo !== videoKey) {
+    setLastVideo(videoKey);
     setInfo(undefined);
     setError(undefined);
   }
@@ -39,7 +44,7 @@ export default function VideoInfoButton({ video, sx }: Props): React.JSX.Element
     setOpen(true);
     if (!info && !error) {
       try {
-        setInfo(await api.probe(video.path));
+        setInfo(await load());
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       }
@@ -85,7 +90,7 @@ export default function VideoInfoButton({ video, sx }: Props): React.JSX.Element
           ) : info ? (
             <Stack spacing={1.5}>
               <Typography sx={{ fontWeight: 600, fontSize: 13, wordBreak: 'break-all' }}>
-                {video.name}
+                {name}
               </Typography>
               <Section title="Format">
                 <Row label="Container" value={info.format.format_long_name} />

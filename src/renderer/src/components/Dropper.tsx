@@ -1,11 +1,9 @@
 import {
   ArrowBackRounded,
-  BoltRounded,
   FileDownloadOutlined,
   FolderOpenOutlined,
   MovieOutlined,
   PlayArrowRounded,
-  SyncRounded,
 } from '@mui/icons-material';
 import {
   Alert,
@@ -25,10 +23,12 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { FFProbeData } from '../../../main/ffmpeg';
 import { type CompatReport, checkCompat } from '../../../shared/compat';
-import { VIDEO_EXTENSIONS } from '../../../shared/media';
+import { SUBTITLE_EXTENSIONS, TORRENT_EXTENSIONS, VIDEO_EXTENSIONS } from '../../../shared/media';
 import type {
   Device,
+  OpenedItem,
   PlayerStatus,
+  ReadyTracks,
   TorrentContents,
   TorrentStats,
   VideoSource,
@@ -46,13 +46,16 @@ import {
 import { cardSx, linkSx, tonalSx } from '../theme';
 import { Artwork, useObjectUrl } from './Artwork';
 import AudioSelector from './AudioSelector';
+import { CompatChip } from './CompatChip';
 import Player from './Player';
 import RemoteButton from './RemoteButton';
 import SubtitleSearchDialog from './SubtitleSearchDialog';
 import SubtitleSizeButton from './SubtitleSizeButton';
 import SubtitleSyncDialog, { type SyncSource } from './SubtitleSyncDialog';
+import type { SubtitlesFile } from './SubtitlesSelection';
 import { isSupported, subtitlesArg } from './SubtitlesSelection';
 import SubtitlesSelector from './SubtitlesSelector';
+import type { SubtitleSearchBackend, SubtitleSyncBackend } from './subtitleBackends';
 import { TorrentChip, TorrentPicker } from './Torrent';
 import { useTrackSelection } from './useTrackSelection';
 import VideoInfoButton from './VideoInfoButton';
@@ -70,9 +73,6 @@ type ReleaseInfo = Awaited<ReturnType<typeof api.guessSubtitleQuery>>;
 // What was sent to the TV, kept apart from the video being prepared next.
 type NowPlaying = { thumbnail?: Uint8Array; title: string; details?: string; infoHash?: string };
 
-// Text formats main can extract or burn (see TEXT_SUBTITLE_EXTENSIONS in subtitleExtractor).
-const SUBTITLE_EXTENSIONS = ['.srt', '.vtt', '.ass', '.ssa'];
-const TORRENT_EXTENSIONS = ['.torrent', '.magnet'];
 const ALL_EXTENSIONS = [...VIDEO_EXTENSIONS, ...TORRENT_EXTENSIONS, ...SUBTITLE_EXTENSIONS];
 
 export default function Dropper({
@@ -187,18 +187,26 @@ export default function Dropper({
   const active = connection?.state === 'CONNECTED' && !!status && status.playerState !== 'IDLE';
   const view = active && (!browsing || !video) ? 'playing' : video ? 'ready' : 'empty';
 
-  function ingest(files: Iterable<File>): void {
+  function ingestFiles(files: Iterable<File>): void {
+    ingest(
+      Array.from(files, (file) => ({ name: file.name, path: pathFor(file), size: file.size }))
+    );
+  }
+
+  function ingest(items: Iterable<OpenedItem>): void {
     const rejected: string[] = [];
-    for (const file of files) {
-      const ext = extensionOf(file.name);
-      if (VIDEO_EXTENSIONS.includes(ext)) {
-        pickVideo({ name: file.name, path: pathFor(file), size: file.size });
+    for (const { name, path, size } of items) {
+      const ext = extensionOf(name);
+      if (isMagnetLink(path)) {
+        void openTorrent(path);
+      } else if (VIDEO_EXTENSIONS.includes(ext)) {
+        pickVideo({ name, path, size });
       } else if (TORRENT_EXTENSIONS.includes(ext)) {
-        void openTorrent(pathFor(file));
+        void openTorrent(path);
       } else if (SUBTITLE_EXTENSIONS.includes(ext)) {
-        selection.addSubtitles({ name: file.name, path: pathFor(file) });
+        selection.addSubtitles({ name, path });
       } else {
-        rejected.push(file.name);
+        rejected.push(name);
       }
     }
     if (rejected.length > 0) {
@@ -208,6 +216,20 @@ export default function Dropper({
     }
   }
 
+  // Files opened from Explorer: those the app was started with, then each one handed
+  // over by a second launch.
+  const ingestRef = useRef(ingest);
+  ingestRef.current = ingest;
+  useEffect(() => {
+    const take = () =>
+      api
+        .takeOpenedItems()
+        .then((items) => ingestRef.current(items))
+        .catch(() => {});
+    void take();
+    return onEvent('opened', () => void take());
+  }, []);
+
   function pickVideo(source: VideoSource): void {
     setVideo(source);
     setBrowsing(true);
@@ -215,7 +237,8 @@ export default function Dropper({
 
   // `source` is a magnet link or a .torrent/.magnet path. Fetching the file list takes
   // a few seconds to a minute, depending on how fast peers turn up.
-  async function openTorrent(source: string): Promise<void> {
+  // Resolves to the error (also shown here), if any.
+  async function openTorrent(source: string): Promise<string | undefined> {
     setOpeningTorrent(true);
     try {
       // Keep the current video streaming in case the user cancels the picker.
@@ -225,8 +248,11 @@ export default function Dropper({
       } else {
         setTorrentChoice(contents);
       }
+      return undefined;
     } catch (err) {
-      setCastError(errorMessage(err));
+      const message = errorMessage(err);
+      setCastError(message);
+      return message;
     } finally {
       setOpeningTorrent(false);
     }
@@ -236,7 +262,7 @@ export default function Dropper({
     event.preventDefault();
     setIsOver(false);
     if (event.dataTransfer.files.length > 0) {
-      ingest(event.dataTransfer.files);
+      ingestFiles(event.dataTransfer.files);
       return;
     }
     // A magnet link dragged from a browser.
@@ -256,7 +282,7 @@ export default function Dropper({
 
   function onFilesPicked(event: React.ChangeEvent<HTMLInputElement>): void {
     if (event.target.files) {
-      ingest(event.target.files);
+      ingestFiles(event.target.files);
     }
     event.target.value = '';
   }
@@ -402,6 +428,11 @@ export default function Dropper({
   // the phone was shown only (main checked it; the window may have moved on since).
   const playRef = useRef(play);
   playRef.current = play;
+  const openTorrentRef = useRef(openTorrent);
+  openTorrentRef.current = openTorrent;
+  const torrentChoiceRef = useRef(torrentChoice);
+  torrentChoiceRef.current = torrentChoice;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: pickVideo only uses setters
   useEffect(() => {
     const answer = (requestId: string, run: () => Promise<string | undefined>) => {
       run().then(
@@ -417,24 +448,146 @@ export default function Dropper({
     const offTracks = onEvent('remoteTracks', ({ requestId, videoPath, change }) =>
       answer(requestId, async () => {
         const error = sameVideo(videoPath);
-        if (!error) await selectionRef.current.applyChange(change);
+        if (error) return error;
+        // The DLNA switches are the window's own (kept between videos).
+        const { burnSubtitles: burn, normalizeAudio: normalize, ...tracks } = change;
+        if (burn !== undefined) setBurnSubtitles(burn);
+        if (normalize !== undefined) setNormalizeAudio(normalize);
+        if (tracks.subtitles !== undefined || tracks.audioIndex !== undefined) {
+          await selectionRef.current.applyChange(tracks);
+        }
+        return undefined;
+      })
+    );
+    const offAdd = onEvent('remoteAddSubtitles', ({ requestId, videoPath, file }) =>
+      answer(requestId, async () => {
+        const error = sameVideo(videoPath);
+        if (!error) selectionRef.current.addSubtitles(file);
         return error;
+      })
+    );
+    const offOpen = onEvent('remoteOpen', ({ requestId, link }) =>
+      answer(requestId, () => openTorrentRef.current(link))
+    );
+    const offPick = onEvent('remoteTorrentPick', ({ requestId, infoHash, index }) =>
+      answer(requestId, async () => {
+        const choice = torrentChoiceRef.current;
+        const picked = choice?.infoHash === infoHash ? choice.videos[index] : undefined;
+        if (!choice || !picked) return 'The computer isn’t offering that video anymore';
+        pickVideo({ ...picked, infoHash });
+        setTorrentChoice(undefined);
+        return undefined;
       })
     );
     return () => {
       offLaunch();
       offTracks();
+      offAdd();
+      offOpen();
+      offPick();
     };
   }, []);
 
-  // What the phone remote shows as ready to play.
-  const readyTracks = selection.tracks;
+  // What the phone remote shows as ready to play: the DLNA switches as a DLNA TV would
+  // get them, whatever screen the window has picked (the phone may pick another).
+  const forcedBurn = bitmapSubs ? 'bitmap' : subtitleScale !== 1 ? 'size' : false;
+  const readyTracks = useMemo<ReadyTracks | undefined>(
+    () =>
+      selection.tracks && {
+        ...selection.tracks,
+        normalizeAudio,
+        burn: hasSubs ? { on: !!forcedBurn || burnSubtitles, forced: forcedBurn } : undefined,
+      },
+    [selection.tracks, normalizeAudio, hasSubs, forcedBurn, burnSubtitles]
+  );
+  const readySubtitles = subtitlesArg(subtitlesSelection);
+  const readyAudio = audioSelection?.index;
   useEffect(() => {
     void api.setRemoteContext({
-      prepared: videoPath ? { videoPath, title, details, tracks: readyTracks } : null,
+      prepared: videoPath
+        ? {
+            videoPath,
+            title,
+            details,
+            tracks: readyTracks,
+            subtitles: readySubtitles,
+            audioIndex: readyAudio,
+            compat,
+          }
+        : null,
       deviceId: device?.id ?? null,
+      torrentChoice: torrentChoice
+        ? {
+            infoHash: torrentChoice.infoHash,
+            name: torrentChoice.name,
+            videos: torrentChoice.videos.map(({ name, size }) => ({ name, size })),
+          }
+        : null,
+      openingTorrent,
     });
-  }, [videoPath, title, details, readyTracks, device?.id]);
+  }, [
+    videoPath,
+    title,
+    details,
+    readyTracks,
+    readySubtitles,
+    readyAudio,
+    compat,
+    device?.id,
+    torrentChoice,
+    openingTorrent,
+  ]);
+
+  // "Find online" for the video ready: a download opens the timing check before use.
+  const searchBackend = useMemo<SubtitleSearchBackend | undefined>(
+    () =>
+      videoPath === undefined
+        ? undefined
+        : {
+            settings: true,
+            guess: async () => {
+              const [guess, settings] = await Promise.all([
+                api.guessSubtitleQuery(videoPath),
+                api.subtitleSettings(),
+              ]);
+              return { guess, languages: settings.languages };
+            },
+            search: (query) => api.searchSubtitles(videoPath, query),
+            download: async (result, episode) => {
+              const file = await api.downloadSubtitle(result, episode);
+              setSyncSource({ name: file.name, pathOrIndex: file.path });
+            },
+          },
+    [videoPath]
+  );
+  // "Fix timing": the subtitles as they are, or a retimed copy, added to the video.
+  const syncBackend = useMemo<SubtitleSyncBackend | undefined>(() => {
+    if (videoPath === undefined || !syncSource) return undefined;
+    const use = (file: SubtitlesFile): void => {
+      selectionRef.current.addSubtitles(file);
+      setSyncSource(undefined);
+      setSearchOpen(false);
+    };
+    return {
+      start: async () => {
+        const [preview, cues] = await Promise.all([
+          api.startPreview(videoPath, readyAudio),
+          api.subtitleCues(videoPath, syncSource.pathOrIndex),
+        ]);
+        return { preview, cues };
+      },
+      stop: () => void api.stopPreview(),
+      apply: async (timing, changed) => {
+        if (changed) {
+          use(await api.retimeSubtitles(videoPath, syncSource.pathOrIndex, timing));
+        } else if (typeof syncSource.pathOrIndex === 'string') {
+          use({ name: syncSource.name, path: syncSource.pathOrIndex });
+        } else {
+          setSyncSource(undefined);
+        }
+      },
+    };
+  }, [videoPath, syncSource, readyAudio]);
 
   return (
     <Box
@@ -561,7 +714,11 @@ export default function Dropper({
                     sx={{ gap: 1, mt: 1, flexWrap: 'wrap', alignItems: 'center' }}
                   >
                     {compat && device && <CompatChip report={compat} deviceName={device.name} />}
-                    <VideoInfoButton video={video} />
+                    <VideoInfoButton
+                      load={() => (probeData ? Promise.resolve(probeData) : api.probe(video.path))}
+                      videoKey={video.path}
+                      name={video.name}
+                    />
                     <Button
                       size="small"
                       onClick={() => browse()}
@@ -737,26 +894,20 @@ export default function Dropper({
         )}
       </Stack>
 
-      {videoPath && (
-        <>
-          <SubtitleSearchDialog
-            open={searchOpen}
-            videoPath={videoPath}
-            onClose={() => setSearchOpen(false)}
-            onDownloaded={(file) => setSyncSource({ name: file.name, pathOrIndex: file.path })}
-          />
-          <SubtitleSyncDialog
-            videoPath={videoPath}
-            audioIndex={audioSelection?.index}
-            source={syncSource}
-            onClose={() => setSyncSource(undefined)}
-            onApply={(file) => {
-              selection.addSubtitles(file);
-              setSyncSource(undefined);
-              setSearchOpen(false);
-            }}
-          />
-        </>
+      {searchBackend && (
+        <SubtitleSearchDialog
+          open={searchOpen}
+          backend={searchBackend}
+          onClose={() => setSearchOpen(false)}
+        />
+      )}
+      {syncBackend && (
+        <SubtitleSyncDialog
+          open
+          name={syncSource?.name}
+          backend={syncBackend}
+          onClose={() => setSyncSource(undefined)}
+        />
       )}
       <TorrentPicker
         contents={torrentChoice}
@@ -835,74 +986,6 @@ function Section({
       </Stack>
       {children}
     </Stack>
-  );
-}
-
-function CompatChip({
-  report,
-  deviceName,
-}: {
-  report: CompatReport;
-  deviceName: string;
-}): React.JSX.Element {
-  const transcoding = report.needsTranscoding;
-
-  return (
-    <Tooltip
-      placement="bottom-start"
-      enterDelay={200}
-      title={
-        <Box sx={{ minWidth: 220, lineHeight: 1.5 }}>
-          <Box sx={{ fontWeight: 600, fontSize: 13, mb: 0.75 }}>
-            {transcoding ? 'Transcoding required' : 'Direct play'}
-          </Box>
-          <Stack spacing={0.25} sx={{ fontSize: 12 }}>
-            <Box>Container: {report.container || 'unknown'}</Box>
-            <Box>Video: {report.videoCodec ?? 'unknown'}</Box>
-            <Box>Audio: {report.audioCodec ?? 'unknown'}</Box>
-          </Stack>
-          {report.issues.length > 0 && (
-            <Box sx={{ mt: 1, pt: 0.75, borderTop: '1px solid', borderColor: 'currentColor' }}>
-              <Box sx={{ fontSize: 11, opacity: 0.8, mb: 0.25 }}>Why re-encode</Box>
-              <Stack component="ul" sx={{ pl: 2, m: 0, fontSize: 12 }} spacing={0.25}>
-                {report.issues.map((issue) => (
-                  <li key={issue.kind}>{issue.detail}</li>
-                ))}
-              </Stack>
-            </Box>
-          )}
-        </Box>
-      }
-    >
-      <Stack
-        direction="row"
-        spacing={0.75}
-        sx={{
-          height: 32,
-          px: 1.5,
-          alignItems: 'center',
-          borderRadius: '8px',
-          bgcolor: 'tonal.secondaryContainer',
-          color: 'tonal.onSecondaryContainer',
-          fontSize: 13,
-          fontWeight: 500,
-          cursor: 'help',
-          minWidth: 0,
-        }}
-      >
-        {transcoding ? (
-          <SyncRounded sx={{ fontSize: 16 }} />
-        ) : (
-          <BoltRounded sx={{ fontSize: 16 }} />
-        )}
-        <Box
-          component="span"
-          sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-        >
-          {transcoding ? `Converted for ${deviceName}` : `Plays directly on ${deviceName}`}
-        </Box>
-      </Stack>
-    </Tooltip>
   );
 }
 

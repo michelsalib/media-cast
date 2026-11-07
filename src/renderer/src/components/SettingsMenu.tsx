@@ -1,9 +1,12 @@
 import {
+  CastOutlined,
   CheckRounded,
   ContrastOutlined,
   DarkModeOutlined,
   InfoOutlined,
   LightModeOutlined,
+  OpenInNewOutlined,
+  SendOutlined,
   SettingsOutlined,
 } from '@mui/icons-material';
 import {
@@ -24,7 +27,12 @@ import {
   Typography,
 } from '@mui/material';
 import { useState } from 'react';
-import type { AppInfo, ThemeSource } from '../../../shared/types';
+import type {
+  AppInfo,
+  ShellIntegration,
+  ShellIntegrationKey,
+  ThemeSource,
+} from '../../../shared/types';
 import { api, errorMessage } from '../ipc';
 
 const THEMES: { value: ThemeSource; label: string; Icon: typeof LightModeOutlined }[] = [
@@ -38,7 +46,15 @@ type Props = {
   onThemeSourceChange: (value: ThemeSource) => void;
 };
 
-// The title bar's one menu: theme, and the about box (versions, ffmpeg paths).
+// Windows Explorer entries for videos and torrents, each switched on or off here.
+const SHELL_ENTRIES: { key: ShellIntegrationKey; label: string; Icon: typeof CastOutlined }[] = [
+  { key: 'contextMenu', label: 'Cast with Media Cast', Icon: CastOutlined },
+  { key: 'openWith', label: 'Open with › Media Cast', Icon: OpenInNewOutlined },
+  { key: 'sendTo', label: 'Send to › Media Cast', Icon: SendOutlined },
+];
+
+// The title bar's one menu: theme, Explorer entries (Windows), and the about box
+// (versions, ffmpeg paths).
 export default function SettingsMenu({
   themeSource,
   onThemeSourceChange,
@@ -47,6 +63,34 @@ export default function SettingsMenu({
   const [aboutOpen, setAboutOpen] = useState(false);
   const [info, setInfo] = useState<AppInfo>();
   const [error, setError] = useState<string>();
+  // null off Windows (section hidden); undefined until read.
+  const [shell, setShell] = useState<ShellIntegration | null>();
+  const [shellBusy, setShellBusy] = useState(false);
+  const [shellError, setShellError] = useState<string>();
+
+  // Read again on each open: the registry is the truth, and the uninstaller or the
+  // user may have changed it.
+  function openMenu(target: HTMLElement): void {
+    setAnchor(target);
+    setShellError(undefined);
+    api
+      .shellIntegration()
+      .then(setShell)
+      .catch((err) => setShellError(errorMessage(err)));
+  }
+
+  async function toggleShell(key: ShellIntegrationKey): Promise<void> {
+    if (!shell) return;
+    setShellBusy(true);
+    setShellError(undefined);
+    try {
+      setShell(await api.setShellIntegration(key, !shell[key]));
+    } catch (err) {
+      setShellError(errorMessage(err));
+    } finally {
+      setShellBusy(false);
+    }
+  }
 
   async function showAbout(): Promise<void> {
     setAnchor(null);
@@ -66,7 +110,7 @@ export default function SettingsMenu({
         <IconButton
           aria-label="Settings"
           aria-haspopup="menu"
-          onClick={(e) => setAnchor(e.currentTarget)}
+          onClick={(e) => openMenu(e.currentTarget)}
           size="small"
           sx={{
             appRegion: 'no-drag',
@@ -102,6 +146,35 @@ export default function SettingsMenu({
             {value === themeSource && <CheckRounded fontSize="small" sx={{ ml: 2 }} />}
           </MenuItem>
         ))}
+        {shell !== null && <Divider />}
+        {shell !== null && (
+          <ListSubheader sx={{ lineHeight: '32px', bgcolor: 'transparent' }}>
+            Right-click a video in Explorer
+          </ListSubheader>
+        )}
+        {shell !== null &&
+          SHELL_ENTRIES.map(({ key, label, Icon }) => (
+            <MenuItem
+              key={key}
+              disabled={!shell || shellBusy}
+              onClick={() => void toggleShell(key)}
+            >
+              <ListItemIcon>
+                <Icon fontSize="small" />
+              </ListItemIcon>
+              <ListItemText>{label}</ListItemText>
+              {shell?.[key] && <CheckRounded fontSize="small" sx={{ ml: 2 }} />}
+            </MenuItem>
+          ))}
+        {shell !== null && shellError && (
+          <Typography
+            variant="caption"
+            color="error"
+            sx={{ display: 'block', px: 2, py: 0.5, maxWidth: 280 }}
+          >
+            {shellError}
+          </Typography>
+        )}
         <Divider />
         <MenuItem onClick={() => void showAbout()}>
           <ListItemIcon>

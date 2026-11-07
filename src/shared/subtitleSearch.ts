@@ -119,3 +119,8 @@ export const DEFAULT_SUBTITLE_LANGUAGES = ['en'];
 export function subtitleLanguageName(code: string): string {
   return SUBTITLE_LANGUAGES.find((l) => l.code === code)?.name ?? code;
 }
+
+// Names a search result: the phone remote downloads one of the last results by it.
+export function resultKey(result: Pick<SubtitleSearchResult, 'provider' | 'ref'>): string {
+  return `${result.provider}:${result.ref}`;
+}

@@ -1,5 +1,5 @@
 import {
-  Forward10Rounded,
+  Forward30Rounded,
   PauseRounded,
   PlayArrowRounded,
   Replay10Rounded,
@@ -59,12 +59,12 @@ export default function PlayPauseSeek({ status, position, onSeek }: Props): Reac
         )}
       </IconButton>
       <IconButton
-        aria-label="Forward 10 seconds"
-        onClick={() => seekBy(10)}
+        aria-label="Forward 30 seconds"
+        onClick={() => seekBy(30)}
         disabled={!known}
         sx={{ color: 'text.secondary' }}
       >
-        <Forward10Rounded sx={{ fontSize: 30 }} />
+        <Forward30Rounded sx={{ fontSize: 30 }} />
       </IconButton>
     </Stack>
   );

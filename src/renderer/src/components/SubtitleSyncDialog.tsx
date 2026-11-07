@@ -22,27 +22,26 @@ import {
   Slider,
   Stack,
   Typography,
+  useMediaQuery,
 } from '@mui/material';
 import format from 'format-duration';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SubtitleCue, SubtitleTiming } from '../../../shared/subtitleSearch';
-import { api, errorMessage } from '../ipc';
+import { errorMessage } from '../ipc';
 import { tonalSx } from '../theme';
-import type { SubtitlesFile } from './SubtitlesSelection';
+import type { PreviewUrls, SubtitleSyncBackend } from './subtitleBackends';
 
 export type SyncSource = { name: string; pathOrIndex: string | number };
 
 type Props = {
-  videoPath: string;
-  audioIndex?: number;
-  // Open while set.
-  source: SyncSource | undefined;
+  open: boolean;
+  // The subtitles' name, shown under the title.
+  name?: string;
+  // Previews the video ready with its subtitles and uses the timing picked, from the
+  // window or the phone. Keep it stable (memoized): a new one starts over.
+  backend: SubtitleSyncBackend;
   onClose: () => void;
-  // The subtitles to use: the source itself when untouched, else a resynced copy.
-  onApply: (file: SubtitlesFile) => void;
 };
-
-type PreviewSource = Awaited<ReturnType<typeof api.startPreview>>;
 
 // Subtitles timed for one frame rate played over a release at another drift linearly
 // (PAL speed-up is 4%). ratio = subtitle fps / video fps.
@@ -58,17 +57,19 @@ const FRAME_RATE_FIXES = [
 
 const NO_TIMING: SubtitleTiming = { offset: 0, ratio: 1 };
 
+// The window's "Fix timing", and the phone remote's.
 export default function SubtitleSyncDialog({
-  videoPath,
-  audioIndex,
-  source,
+  open,
+  name,
+  backend,
   onClose,
-  onApply,
 }: Props): React.JSX.Element {
+  // A phone, or a narrow window: the lines go under the video.
+  const compact = useMediaQuery((theme) => theme.breakpoints.down('md'));
   const videoRef = useRef<HTMLVideoElement>(null);
   // A transcoded seek swaps the stream; keep playing across it.
   const resumeAfterLoad = useRef(false);
-  const [preview, setPreview] = useState<PreviewSource | undefined>();
+  const [preview, setPreview] = useState<PreviewUrls | undefined>();
   const [cues, setCues] = useState<SubtitleCue[]>([]);
   // Transcoded streams restart at the seek point: `base` is where the current one began.
   const [mode, setMode] = useState<'direct' | 'transcode'>('direct');
@@ -82,23 +83,20 @@ export default function SubtitleSyncDialog({
   const [applying, setApplying] = useState(false);
   const [showRateFix, setShowRateFix] = useState(false);
 
-  const open = !!source;
   const duration = preview?.duration ?? 0;
   const changed = timing.offset !== 0 || timing.ratio !== 1;
 
   useEffect(() => {
-    if (!source) return;
+    if (!open) return;
     let cancelled = false;
     setError(undefined);
     setTiming(NO_TIMING);
     setShowRateFix(false);
     setPlaying(false);
     setSrc(undefined);
-    Promise.all([
-      api.startPreview(videoPath, audioIndex),
-      api.subtitleCues(videoPath, source.pathOrIndex),
-    ])
-      .then(([p, c]) => {
+    backend
+      .start()
+      .then(({ preview: p, cues: c }) => {
         if (cancelled) return;
         setPreview(p);
         setCues(c);
@@ -118,9 +116,9 @@ export default function SubtitleSyncDialog({
       .catch((err: unknown) => !cancelled && setError(errorMessage(err)));
     return () => {
       cancelled = true;
-      void api.stopPreview();
+      backend.stop();
     };
-  }, [source, videoPath, audioIndex]);
+  }, [open, backend]);
 
   // Smooth clock for the overlay: timeupdate only fires ~4×/s.
   useEffect(() => {
@@ -192,19 +190,9 @@ export default function SubtitleSyncDialog({
   }
 
   function apply(): void {
-    if (!source) return;
-    if (!changed) {
-      if (typeof source.pathOrIndex === 'string') {
-        onApply({ name: source.name, path: source.pathOrIndex });
-      } else {
-        onClose();
-      }
-      return;
-    }
     setApplying(true);
-    api
-      .retimeSubtitles(videoPath, source.pathOrIndex, timing)
-      .then(onApply)
+    backend
+      .apply(timing, changed)
       .catch((err: unknown) => setError(errorMessage(err)))
       .finally(() => setApplying(false));
   }
@@ -226,18 +214,22 @@ export default function SubtitleSyncDialog({
       }}
     >
       {/* The window's title bar area: keep it draggable, the system controls sit over it. */}
-      <Box sx={{ height: 32, flexShrink: 0, appRegion: 'drag' }} />
+      {!compact && <Box sx={{ height: 32, flexShrink: 0, appRegion: 'drag' }} />}
 
-      <Stack direction="row" spacing={1.75} sx={{ alignItems: 'center', px: 4, pt: 1.5, pb: 2.25 }}>
+      <Stack
+        direction="row"
+        spacing={1.75}
+        sx={{ alignItems: 'center', px: compact ? 1.5 : 4, pt: 1.5, pb: compact ? 1.5 : 2.25 }}
+      >
         <IconButton onClick={onClose} aria-label="Back" sx={{ color: 'text.secondary' }}>
           <ArrowBackRounded />
         </IconButton>
         <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Typography variant="h1" sx={{ fontSize: 26 }}>
+          <Typography variant="h1" sx={{ fontSize: compact ? 20 : 26 }}>
             Are the subtitles in time?
           </Typography>
           <Typography noWrap sx={{ fontSize: 12, color: 'text.secondary' }}>
-            {source?.name}
+            {name}
           </Typography>
         </Box>
         <Button
@@ -245,14 +237,32 @@ export default function SubtitleSyncDialog({
           onClick={apply}
           disabled={applying || !src}
           startIcon={applying ? <CircularProgress size={16} color="inherit" /> : undefined}
-          sx={{ height: 46, px: 3, fontSize: 15, fontWeight: 700 }}
+          sx={{ height: 46, px: compact ? 2 : 3, fontSize: 15, fontWeight: 700, flexShrink: 0 }}
         >
           {changed ? 'Use new timing' : 'Looks good'}
         </Button>
       </Stack>
 
-      <Stack direction="row" spacing={2.5} sx={{ flex: 1, minHeight: 0, px: 4, pb: 3 }}>
-        <Stack spacing={1.5} sx={{ flex: 1, minWidth: 0, minHeight: 0, overflowY: 'auto' }}>
+      <Stack
+        direction={compact ? 'column' : 'row'}
+        spacing={2.5}
+        sx={{
+          flex: 1,
+          minHeight: 0,
+          px: compact ? 1.5 : 4,
+          pb: 3,
+          overflowY: compact ? 'auto' : undefined,
+        }}
+      >
+        <Stack
+          spacing={1.5}
+          sx={{
+            flex: compact ? undefined : 1,
+            minWidth: 0,
+            minHeight: 0,
+            overflowY: compact ? undefined : 'auto',
+          }}
+        >
           <Box
             sx={{
               position: 'relative',
@@ -369,8 +379,10 @@ export default function SubtitleSyncDialog({
           <Stack
             direction="row"
             spacing={2}
+            useFlexGap
             sx={{
               alignItems: 'center',
+              flexWrap: 'wrap',
               px: 2.25,
               py: 1.5,
               borderRadius: '24px',
@@ -436,7 +448,12 @@ export default function SubtitleSyncDialog({
           </Stack>
 
           {showRateFix || timing.ratio !== 1 ? (
-            <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', flexShrink: 0 }}>
+            <Stack
+              direction="row"
+              spacing={1.5}
+              useFlexGap
+              sx={{ alignItems: 'center', flexShrink: 0, flexWrap: 'wrap' }}
+            >
               <Select
                 size="small"
                 value={timing.ratio}
@@ -466,7 +483,7 @@ export default function SubtitleSyncDialog({
           {error && <Alert severity="error">{error}</Alert>}
         </Stack>
 
-        <Stack spacing={1.25} sx={{ width: 270, flexShrink: 0, minHeight: 0 }}>
+        <Stack spacing={1.25} sx={{ width: compact ? 'auto' : 270, flexShrink: 0, minHeight: 0 }}>
           <Typography sx={{ color: 'text.secondary', lineHeight: 1.4 }}>
             Or pause right as someone speaks, then tap that line:
           </Typography>

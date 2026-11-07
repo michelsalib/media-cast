@@ -9,7 +9,9 @@ import type {
   AppInfo,
   DevicesScanner,
   MainEvents,
+  OpenedItem,
   RemoteContext,
+  ShellIntegrationKey,
   ThemeSource,
   TrackChange,
 } from '../shared/types';
@@ -19,6 +21,7 @@ import type { PlaybackController } from './PlaybackController';
 import type { PreviewServer } from './PreviewServer';
 import type { RemoteHub } from './remote/RemoteHub';
 import type { RemoteServer } from './remote/RemoteServer';
+import { setShellIntegration, shellIntegration } from './shellIntegration';
 import { parseReleaseName } from './subtitles/releaseName';
 import {
   downloadSubtitle,
@@ -40,6 +43,8 @@ export interface MainApiDeps {
   playingVideoPath: () => string | undefined;
   scanners: readonly DevicesScanner[];
   updater: { quitAndInstall(): void };
+  // Files Explorer opened the app with, not yet taken by the window.
+  takeOpenedItems: () => OpenedItem[];
 }
 
 // Single source of truth for renderer → main calls. Each key becomes an
@@ -56,9 +61,14 @@ export function createMainApi({
   playingVideoPath,
   scanners,
   updater,
+  takeOpenedItems,
 }: MainApiDeps) {
   return {
     appearance: () => appearance(),
+    // null off Windows.
+    shellIntegration: () => shellIntegration(),
+    setShellIntegration: (key: ShellIntegrationKey, on: boolean) => setShellIntegration(key, on),
+    takeOpenedItems: (): OpenedItem[] => takeOpenedItems(),
     setThemeSource: (themeSource: ThemeSource): void => setThemeSource(themeSource),
     setTitleBarColors: (color: string, symbolColor: string): void =>
       setTitleBarColors(window, color, symbolColor),
@@ -110,6 +120,10 @@ export function createMainApi({
     changeTracks: (change: TrackChange) => controller.changeTracks(change),
     playingCues: () => controller.cues(),
     retimePlaying: (offset: number) => controller.retime(offset),
+    // The video playing, for "Find online" and Details while it plays.
+    playingPath: (): string | undefined => controller.nowPlaying?.videoPath,
+    // A subtitle file found online, played with the video playing.
+    playSubtitleFile: (path: string) => controller.playSubtitleFile(path),
     // The window reports what it has ready, and how a phone-started Play went.
     setRemoteContext: (context: RemoteContext): void => hub.setContext(context),
     remoteDone: (requestId: string, error?: string): void => hub.done(requestId, error),

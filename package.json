@@ -1,7 +1,7 @@
 {
   "name": "media-cast",
   "version": "2.5.0",
-  "description": "An Electron application with React and TypeScript",
+  "description": "Media Cast",
   "main": "./out/main/index.js",
   "author": "example.com",
   "homepage": "https://micheldev.com/media-cast",

@@ -22,6 +22,8 @@ nsis:
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
+  # Uninstall removes the Explorer entries switched on in the settings menu.
+  include: build/installer.nsh
 mac:
   # The universal merger refuses a single-arch binary that is byte-identical in both
   # slices unless it matches this glob. evermeet.cx only ships x86_64 ffmpeg, and native

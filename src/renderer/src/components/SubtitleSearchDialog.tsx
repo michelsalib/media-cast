@@ -12,6 +12,7 @@ import {
   TextField,
   Tooltip,
   Typography,
+  useMediaQuery,
 } from '@mui/material';
 import { useCallback, useEffect, useState } from 'react';
 import {
@@ -21,26 +22,23 @@ import {
   type SubtitleSearchResult,
   subtitleLanguageName,
 } from '../../../shared/subtitleSearch';
-import { api, errorMessage } from '../ipc';
+import { errorMessage } from '../ipc';
 import { tonalSx } from '../theme';
 import LanguagesInput from './LanguagesInput';
 import SubtitleSettingsDialog from './SubtitleSettingsDialog';
-import type { SubtitlesFile } from './SubtitlesSelection';
+import type { SubtitleSearchBackend } from './subtitleBackends';
 
 type Props = {
   open: boolean;
-  videoPath: string;
+  // For the video ready or playing, from the window or the phone: also decides what a
+  // download does. Keep it stable (memoized): a new one searches again.
+  backend: SubtitleSearchBackend;
   onClose: () => void;
-  // A result was downloaded; the caller previews it before using it.
-  onDownloaded: (file: SubtitlesFile) => void;
 };
 
-export default function SubtitleSearchDialog({
-  open,
-  videoPath,
-  onClose,
-  onDownloaded,
-}: Props): React.JSX.Element {
+// The window's "Find online" (video ready or playing), and the phone remote's.
+export default function SubtitleSearchDialog({ open, backend, onClose }: Props): React.JSX.Element {
+  const compact = useMediaQuery((theme) => theme.breakpoints.down('sm'));
   const [title, setTitle] = useState('');
   const [year, setYear] = useState('');
   const [season, setSeason] = useState('');
@@ -56,13 +54,13 @@ export default function SubtitleSearchDialog({
     (query: SubtitleQuery): void => {
       setSearching(true);
       setError(undefined);
-      api
-        .searchSubtitles(videoPath, query)
+      backend
+        .search(query)
         .then(setResponse)
         .catch((err: unknown) => setError(errorMessage(err)))
         .finally(() => setSearching(false));
     },
-    [videoPath]
+    [backend]
   );
 
   // Fill the form from the file name and search straight away.
@@ -71,21 +69,22 @@ export default function SubtitleSearchDialog({
     let cancelled = false;
     setResponse(undefined);
     setError(undefined);
-    Promise.all([api.guessSubtitleQuery(videoPath), api.subtitleSettings()])
-      .then(([guess, settings]) => {
+    backend
+      .guess()
+      .then(({ guess, languages }) => {
         if (cancelled) return;
         setTitle(guess.title);
         setYear(guess.year ? String(guess.year) : '');
         setSeason(guess.season !== undefined ? String(guess.season) : '');
         setEpisode(guess.episode !== undefined ? String(guess.episode) : '');
-        setLanguages(settings.languages);
-        search({ ...guess, languages: settings.languages });
+        setLanguages(languages);
+        search({ ...guess, languages });
       })
       .catch((err: unknown) => !cancelled && setError(errorMessage(err)));
     return () => {
       cancelled = true;
     };
-  }, [open, videoPath, search]);
+  }, [open, backend, search]);
 
   function currentQuery(): SubtitleQuery {
     const s = Number.parseInt(season, 10);
@@ -111,9 +110,8 @@ export default function SubtitleSearchDialog({
     const { season: s, episode: e } = currentQuery();
     setDownloading(result);
     setError(undefined);
-    api
-      .downloadSubtitle(result, { season: s, episode: e })
-      .then(onDownloaded)
+    backend
+      .download(result, { season: s, episode: e })
       .catch((err: unknown) => setError(errorMessage(err)))
       .finally(() => setDownloading(undefined));
   }
@@ -128,16 +126,18 @@ export default function SubtitleSearchDialog({
       onClose={onClose}
       slotProps={{
         paper: {
-          sx: {
-            top: 44,
-            right: 12,
-            bottom: 12,
-            height: 'auto',
-            width: 'min(460px, calc(100% - 24px))',
-            borderRadius: '28px',
-            backgroundImage: 'none',
-            bgcolor: 'tonal.surfaceContainerLow',
-          },
+          sx: compact
+            ? { width: '100%', backgroundImage: 'none', bgcolor: 'tonal.surfaceContainerLow' }
+            : {
+                top: 44,
+                right: 12,
+                bottom: 12,
+                height: 'auto',
+                width: 'min(460px, calc(100% - 24px))',
+                borderRadius: '28px',
+                backgroundImage: 'none',
+                bgcolor: 'tonal.surfaceContainerLow',
+              },
         },
       }}
     >
@@ -149,11 +149,13 @@ export default function SubtitleSearchDialog({
         <Typography variant="h2" sx={{ flex: 1 }}>
           Find subtitles
         </Typography>
-        <Tooltip title="Languages, accounts and API keys">
-          <IconButton onClick={() => setSettingsOpen(true)} sx={{ color: 'text.secondary' }}>
-            <TuneRounded fontSize="small" />
-          </IconButton>
-        </Tooltip>
+        {backend.settings && (
+          <Tooltip title="Languages, accounts and API keys">
+            <IconButton onClick={() => setSettingsOpen(true)} sx={{ color: 'text.secondary' }}>
+              <TuneRounded fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        )}
         <IconButton onClick={onClose} aria-label="close" sx={{ color: 'text.secondary' }}>
           <CloseRounded fontSize="small" />
         </IconButton>
@@ -164,7 +166,10 @@ export default function SubtitleSearchDialog({
         onSubmit={submit}
         sx={{
           display: 'grid',
-          gridTemplateColumns: 'minmax(0, 1fr) 64px 64px 76px',
+          // On a phone the title gets a row of its own.
+          gridTemplateColumns: compact
+            ? 'repeat(3, minmax(0, 1fr))'
+            : 'minmax(0, 1fr) 64px 64px 76px',
           gap: 1,
           px: 3,
           pt: 1,
@@ -177,6 +182,7 @@ export default function SubtitleSearchDialog({
           size="small"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
+          sx={compact ? { gridColumn: '1 / -1' } : undefined}
           slotProps={{
             input: {
               startAdornment: (
@@ -205,7 +211,7 @@ export default function SubtitleSearchDialog({
           value={year}
           onChange={(e) => setYear(e.target.value.replace(/\D/g, ''))}
         />
-        <Box sx={{ gridColumn: '1 / 4' }}>
+        <Box sx={{ gridColumn: compact ? '1 / 3' : '1 / 4' }}>
           <LanguagesInput value={languages} onChange={setLanguages} />
         </Box>
         <Button
@@ -269,7 +275,7 @@ export default function SubtitleSearchDialog({
       )}
 
       <SubtitleSettingsDialog
-        open={settingsOpen}
+        open={backend.settings && settingsOpen}
         onClose={() => setSettingsOpen(false)}
         onSaved={(settings) => {
           setLanguages(settings.languages);

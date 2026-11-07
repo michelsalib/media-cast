@@ -4,6 +4,7 @@ import {
   PauseRounded,
   PlayArrowRounded,
   Replay10Rounded,
+  SearchRounded,
   StopRounded,
   TvRounded,
 } from '@mui/icons-material';
@@ -25,14 +26,19 @@ import format from 'format-duration';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { SubtitleCue } from '../../../shared/subtitleSearch';
 import type { PlayerStatus, PlayingTracks, TorrentStats } from '../../../shared/types';
+import { ConvertingChip } from '../components/CompatChip';
 import LiveSubtitles from '../components/LiveSubtitles';
+import SubtitleSearchDialog from '../components/SubtitleSearchDialog';
 import { TorrentChip } from '../components/Torrent';
 import TrackSwitcher from '../components/TrackSwitcher';
+import VideoInfoButton from '../components/VideoInfoButton';
 import { episodeLabel } from '../labels';
 import { SeekHold } from '../seekHold';
 import { cardSx, DEFAULT_ACCENT, makeTheme, tonalSx } from '../theme';
+import { remoteSearch } from './backends';
 import { connectEvents, type RemoteState, remote } from './client';
 import ReadyCard from './ReadyCard';
+import TorrentCard from './TorrentCard';
 
 // The TV's position as last reported, and when, so the phone can run it forward
 // between the once-a-second status pushes.
@@ -57,7 +63,18 @@ export default function RemoteApp(): React.JSX.Element {
   const [preview, setPreview] = useState<Preview>();
   const [previewTime, setPreviewTime] = useState(0);
   const [message, setMessage] = useState<{ text: string; error?: boolean }>();
+  const [searchOpen, setSearchOpen] = useState(false);
   const video = useRef<HTMLVideoElement>(null);
+  const notify = useCallback((text: string) => setMessage({ text }), []);
+  // Subtitles found online for the video playing: played with it straight away.
+  const search = useMemo(
+    () =>
+      remoteSearch(null, () => {
+        setSearchOpen(false);
+        setMessage({ text: 'Subtitles updated on the TV' });
+      }),
+    []
+  );
 
   const dark = useMediaQuery('(prefers-color-scheme: dark)', { noSsr: true });
   const theme = useMemo(
@@ -231,7 +248,8 @@ export default function RemoteApp(): React.JSX.Element {
               <TvRounded sx={{ fontSize: 40, color: 'text.secondary' }} />
               <Typography variant="h2">Nothing is ready</Typography>
               <Typography sx={{ color: 'text.secondary' }}>
-                Pick a video on the computer. You can then start it from here.
+                Pick a video on the computer, or open a torrent below. You can then start it from
+                here.
               </Typography>
             </Stack>
           )}
@@ -244,6 +262,8 @@ export default function RemoteApp(): React.JSX.Element {
               secondary={false}
               subtitleScale={subtitleScale}
               onSubtitleScale={changeSubtitleScale}
+              stats={stats.find((s) => s.infoHash === state.prepared?.infoHash)}
+              onMessage={notify}
             />
           )}
 
@@ -282,6 +302,12 @@ export default function RemoteApp(): React.JSX.Element {
                     <Typography sx={{ fontSize: 13, color: 'text.secondary', flex: 1 }}>
                       {stateLabel(status)} {nowPlaying.deviceName}
                     </Typography>
+                    {status?.transcoded && <ConvertingChip />}
+                    <VideoInfoButton
+                      load={() => remote.videoInfo(null)}
+                      videoKey={`${nowPlaying.fileName}#${loadCount}`}
+                      name={nowPlaying.fileName}
+                    />
                     {nowPlaying.infoHash && (
                       <TorrentChip stats={stats.find((s) => s.infoHash === nowPlaying.infoHash)} />
                     )}
@@ -365,8 +391,20 @@ export default function RemoteApp(): React.JSX.Element {
                     deviceType={tracks.deviceType}
                     onChange={(change) => act(() => remote.changeTracks(change))}
                   />
+                  <Button
+                    startIcon={<SearchRounded />}
+                    onClick={() => setSearchOpen(true)}
+                    sx={[tonalSx, { alignSelf: 'flex-start' }]}
+                  >
+                    Find subtitles online
+                  </Button>
                 </Stack>
               )}
+              <SubtitleSearchDialog
+                open={searchOpen}
+                backend={search}
+                onClose={() => setSearchOpen(false)}
+              />
 
               {cues.length > 0 && (
                 <Stack spacing={1.5} sx={{ ...cardSx, p: 2 }}>
@@ -476,9 +514,14 @@ export default function RemoteApp(): React.JSX.Element {
                   secondary
                   subtitleScale={subtitleScale}
                   onSubtitleScale={changeSubtitleScale}
+                  stats={stats.find((s) => s.infoHash === state.prepared?.infoHash)}
+                  onMessage={notify}
                 />
               )}
             </>
+          )}
+          {state && (state.torrentChoice || state.openingTorrent || !nowPlaying) && (
+            <TorrentCard choice={state.torrentChoice} opening={state.openingTorrent} />
           )}
         </Stack>
       </Box>
