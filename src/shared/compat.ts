@@ -33,11 +33,7 @@ export const CONTAINER_MIMES: Record<string, readonly string[]> = {
 export const DIRECT_PLAY_CONTAINERS_FALLBACK = new Set(['.mp4']);
 
 export type CompatIssueKind =
-  | 'container'
-  | 'videoCodec'
-  | 'audioCodec'
-  | 'subtitles'
-  | 'audioTrack';
+  'container' | 'videoCodec' | 'audioCodec' | 'subtitles' | 'audioTrack';
 
 export interface CompatIssue {
   kind: CompatIssueKind;

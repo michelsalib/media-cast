@@ -6,17 +6,18 @@ Electron + React + TS app that streams local video to Chromecast and UPnP/DLNA, 
 
 ## Commands
 
-Package manager and script runner is **bun** (`bun install`, lockfile `bun.lock`). Electron's own tooling (electron-vite, electron-builder) still executes on Node (`.nvmrc`); bun only drives the scripts. Dependency postinstalls are blocked by bun except its default-trusted list (electron and sharp are on it) — do not add `trustedDependencies`, it *replaces* that list. A native dependency whose install script matters gets it redone by our own `postinstall` instead: [download-datachannel.mjs](scripts/download-datachannel.mjs) fetches node-datachannel's N-API prebuild (lipo'd universal on macOS). N-API bindings load in Electron unchanged, so there is no `@electron/rebuild` / `install-app-deps` (`npmRebuild: false`); electron-builder unpacks `.node` files from the asar by itself.
+Package manager and script runner is **bun** (`bun install`, lockfile `bun.lock`). Electron's own tooling (electron-vite, electron-builder) still executes on Node (`.nvmrc`); bun only drives the scripts. Dependency postinstalls are blocked by bun except its default-trusted list (electron and sharp are on it) — do not add `trustedDependencies`, it _replaces_ that list. A native dependency whose install script matters gets it redone by our own `postinstall` instead: [download-datachannel.mjs](scripts/download-datachannel.mjs) fetches node-datachannel's N-API prebuild (lipo'd universal on macOS). N-API bindings load in Electron unchanged, so there is no `@electron/rebuild` / `install-app-deps` (`npmRebuild: false`); electron-builder unpacks `.node` files from the asar by itself.
 
 ```bash
 bun run dev               # electron-vite dev (HMR for main/preload/renderer)
-bun run typecheck         # both projects; TypeScript 7 native `tsc`
-bun run check             # biome lint + format --write
+bun check                 # typecheck, both projects (built-in; no typescript package)
+bun fmt                   # format (built-in; .prettierrc.json, shared with the VS Code Prettier extension)
+bun lint                  # runs the `lint` script: biome check (lint + import order); --write fixes
 bun run prepare:binaries  # fetch static ffmpeg/ffprobe into resources/bin/<platform>-<arch>/
-bun run build:{win,mac}  # runs typecheck → electron-vite build → electron-builder
+bun run build:{win,mac}  # runs bun check → electron-vite build → electron-builder
 ```
 
-No tests. `build` aborts on typecheck failure. Biome (not ESLint/Prettier) — see `biome.json`. TS root is references-only; edit `tsconfig.node.json` (main+preload+scripts) or `tsconfig.web.json` (renderer). Electron 44+: macOS 13+ and 64-bit Windows only.
+No tests. `build` aborts on typecheck failure. No `check`/`fmt`/`typecheck` scripts: a script with a built-in's name shadows it. Biome is only the linter (its formatter is off, see `biome.json`) until a stable bun ships `bun lint` (canary-only as of 1.4.4); then drop `@biomejs/biome` and the `lint` script. TS root is references-only; edit `tsconfig.node.json` (main+preload+scripts) or `tsconfig.web.json` (renderer). Electron 45 (Node 24; keep `@types/node` at most one major ahead): macOS 13+ and 64-bit Windows only.
 
 ## ffmpeg/ffprobe
 
@@ -30,7 +31,7 @@ Three processes communicating only via the IPC bridge in [src/preload/index.ts](
 - **preload** — a generic bridge exposed as `window.ipc` with exactly three members: `invoke(channel, ...args)`, `on(channel, cb) → unsubscribe`, `pathFor(file)`. No per-method code lives here; typing is done in the renderer.
 - **renderer** ([src/renderer/src/](src/renderer/src/)) — React 19 + MUI 9 (Emotion `sx`, no Tailwind, no router, no store). Alias `@renderer` → `src/renderer/src`.
 
-Shared types are in [src/shared/types.ts](src/shared/types.ts). The `Renderer` interface there (playback abstraction) is *not* the Electron renderer process — same word, different meaning.
+Shared types are in [src/shared/types.ts](src/shared/types.ts). The `Renderer` interface there (playback abstraction) is _not_ the Electron renderer process — same word, different meaning.
 
 ### Playback: `Renderer` interface
 

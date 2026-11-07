@@ -19,23 +19,23 @@ No TV-side setup. No media library to configure. No account. Works with **Chrome
 
 ## Features
 
-| | |
-|---|---|
-| **Zero TV setup** | Discovers Chromecast and DLNA renderers automatically on your LAN |
+|                         |                                                                              |
+| ----------------------- | ---------------------------------------------------------------------------- |
+| **Zero TV setup**       | Discovers Chromecast and DLNA renderers automatically on your LAN            |
 | **Subtitles, your way** | External (`.srt`, `.smi`, …) and embedded tracks, with on-the-fly conversion |
-| **Burn-in fallback** | For older DLNA TVs that ignore sidecar subs |
-| **Universal playback** | MPEG-TS transcoding for renderers that can't play your source directly |
-| **Drag & drop** | Drop the video, drop the subs, hit play |
-| **Batteries included** | Bundled `ffmpeg` / `ffprobe` — nothing else to install |
+| **Burn-in fallback**    | For older DLNA TVs that ignore sidecar subs                                  |
+| **Universal playback**  | MPEG-TS transcoding for renderers that can't play your source directly       |
+| **Drag & drop**         | Drop the video, drop the subs, hit play                                      |
+| **Batteries included**  | Bundled `ffmpeg` / `ffprobe` — nothing else to install                       |
 
 ## Download
 
 <a href="https://github.com/michelsalib/media-cast/releases/latest"><img src="https://img.shields.io/github/v/release/michelsalib/media-cast?label=Download%20latest&style=for-the-badge&color=7c4dff" alt="Download latest release" /></a>
 
-| Platform | Installer |
-|---|---|
-| Windows | `.exe` installer |
-| macOS | `.dmg` (universal — Intel + Apple Silicon) |
+| Platform | Installer                                  |
+| -------- | ------------------------------------------ |
+| Windows  | `.exe` installer                           |
+| macOS    | `.dmg` (universal — Intel + Apple Silicon) |
 
 Requires Windows 10/11 (64-bit) or macOS 13 (Ventura) or later.
 
@@ -65,4 +65,4 @@ bun run build:win     # Windows
 bun run build:mac     # macOS (universal)
 ```
 
-**Tooling:** [electron-vite](https://electron-vite.org/) · [Biome](https://biomejs.dev/) (lint + format) · TypeScript 7 native `tsc` (typecheck). See [CLAUDE.md](CLAUDE.md) for an architecture overview.
+**Tooling:** [electron-vite](https://electron-vite.org/) · bun (`bun check` typecheck, `bun fmt` format) · [Biome](https://biomejs.dev/) (lint). See [CLAUDE.md](CLAUDE.md) for an architecture overview.

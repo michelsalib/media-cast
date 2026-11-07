@@ -51,17 +51,18 @@ async function readStored(): Promise<StoredSettings> {
   }
 }
 
-function encodeSecret(value: string): StoredSecret {
-  return safeStorage.isEncryptionAvailable()
-    ? { encrypted: safeStorage.encryptString(value).toString('base64') }
+async function encodeSecret(value: string): Promise<StoredSecret> {
+  return (await safeStorage.isAsyncEncryptionAvailable())
+    ? { encrypted: (await safeStorage.encryptStringAsync(value)).toString('base64') }
     : { plain: value };
 }
 
-function decodeSecret(secret: StoredSecret | undefined): string {
+// The async API also reads what the sync encryptString wrote before Electron 45.
+async function decodeSecret(secret: StoredSecret | undefined): Promise<string> {
   if (!secret) return '';
   if ('plain' in secret) return secret.plain;
   try {
-    return safeStorage.decryptString(Buffer.from(secret.encrypted, 'base64'));
+    return (await safeStorage.decryptStringAsync(Buffer.from(secret.encrypted, 'base64'))).result;
   } catch {
     // Encrypted under another OS user or a reset keyring: ask for it again.
     return '';
@@ -75,7 +76,7 @@ export async function loadSubtitleSettings(): Promise<SubtitleSettings> {
     opensubtitles: {
       apiKey: stored.opensubtitles.apiKey || BUILT_IN_OPENSUBTITLES_API_KEY,
       username: stored.opensubtitles.username,
-      password: decodeSecret(stored.opensubtitles.password),
+      password: await decodeSecret(stored.opensubtitles.password),
     },
     subdl: { apiKey: stored.subdl.apiKey || BUILT_IN_SUBDL_API_KEY },
   };
@@ -107,7 +108,7 @@ export async function saveSubtitleSettings(
     subdl: { ...stored.subdl, ...patch.subdl },
   };
   if (password !== undefined) {
-    next.opensubtitles.password = password ? encodeSecret(password) : undefined;
+    next.opensubtitles.password = password ? await encodeSecret(password) : undefined;
   }
   await writeFile(settingsPath(), JSON.stringify(next, null, 2));
   return subtitleSettingsView();

@@ -54,17 +54,15 @@ export const gestdown: SubtitleProvider = {
         );
         return (body?.matchingSubtitles ?? [])
           .filter((s) => s.completed)
-          .map(
-            (s): SubtitleSearchResult => ({
-              provider: 'gestdown',
-              ref: s.downloadUri,
-              language,
-              release: `${show.name} S${pad(season)}E${pad(episode)} ${s.version}`,
-              hearingImpaired: s.hearingImpaired,
-              hashMatch: false,
-              downloads: s.downloadCount,
-            })
-          );
+          .map((s): SubtitleSearchResult => ({
+            provider: 'gestdown',
+            ref: s.downloadUri,
+            language,
+            release: `${show.name} S${pad(season)}E${pad(episode)} ${s.version}`,
+            hearingImpaired: s.hearingImpaired,
+            hashMatch: false,
+            downloads: s.downloadCount,
+          }));
       })
     );
     return perLanguage.flat();
