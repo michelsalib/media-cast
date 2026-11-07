@@ -32,7 +32,6 @@ import { episodeLabel } from '../labels';
 import { SeekHold } from '../seekHold';
 import { cardSx, DEFAULT_ACCENT, makeTheme, tonalSx } from '../theme';
 import { connectEvents, type RemoteState, remote } from './client';
-import { useMediaSession } from './mediaSession';
 import ReadyCard from './ReadyCard';
 
 // The TV's position as last reported, and when, so the phone can run it forward
@@ -207,25 +206,6 @@ export default function RemoteApp(): React.JSX.Element {
   const cueAt = (time: number): SubtitleCue | undefined =>
     cues.find((c) => time >= c.start + offset && time < c.end + offset);
   const previewLine = preview ? cueAt(previewTime) : undefined;
-
-  useMediaSession({
-    media: nowPlaying
-      ? {
-          title,
-          artist: `On ${nowPlaying.deviceName}`,
-          album: eyebrow,
-          artwork: `artwork?n=${loadCount}`,
-        }
-      : null,
-    playing,
-    duration,
-    position: clock.time,
-    statusAt: clock.at,
-    onPlay: () => void act(() => remote.play()),
-    onPause: () => void act(() => remote.pause()),
-    onSeek: seek,
-    onSeekBy: (delta) => seek(tvTime + delta),
-  });
 
   return (
     <ThemeProvider theme={theme}>
