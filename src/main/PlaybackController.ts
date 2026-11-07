@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { extname, join } from 'node:path';
 import { app, type BrowserWindow, powerSaveBlocker } from 'electron';
-import { checkCompat } from '../shared/compat';
+import { checkCompat, onlyAudioConverted } from '../shared/compat';
 import type { SubtitleCue } from '../shared/subtitleSearch';
 import { isBitmapSubtitleCodec, SUBTITLE_SCALES } from '../shared/subtitles';
 import { describeTracks } from '../shared/tracks';
@@ -23,7 +23,7 @@ import {
   type SubtitleSource,
 } from './ffmpeg';
 import type { MediaServer } from './MediaServer';
-import { detectSubtitleCharenc, extractSubtitles } from './subtitleExtractor';
+import { extractSubtitles, subtitleFileForBurning } from './subtitleExtractor';
 import { retimeSubtitles, subtitleCues } from './subtitles/search';
 import type { TorrentStore } from './torrents';
 import type { UpnpDevice } from './upnp/DevicesScanner';
@@ -38,6 +38,7 @@ interface LoadOptions {
   subtitlesPathOrIndex?: string | number;
   audioIndex?: number;
   burnSubtitles: boolean;
+  normalizeAudio: boolean;
 }
 
 export class PlaybackController {
@@ -129,7 +130,8 @@ export class PlaybackController {
     videoPath: string,
     subtitlesPathOrIndex?: string | number,
     audioIndex?: number,
-    burnSubtitles = false
+    burnSubtitles = false,
+    normalizeAudio = false
   ): Promise<void> {
     if (!this.renderer || !this.currentDevice) {
       throw new Error('Not connected');
@@ -145,17 +147,21 @@ export class PlaybackController {
       (this.currentDevice.type === 'upnp' &&
         subtitlesPathOrIndex !== undefined &&
         this.scale !== 1);
+    // Only a DLNA stream goes through ffmpeg; a Chromecast plays the file as it is.
+    const normalize = normalizeAudio && this.currentDevice.type === 'upnp';
     try {
       const resizableSubtitles = await this.loadOn(this.renderer, this.currentDevice, videoPath, {
         subtitlesPathOrIndex,
         audioIndex,
         burnSubtitles: burn,
+        normalizeAudio: normalize,
       });
       this.current = {
         videoPath,
         subtitlesPathOrIndex,
         audioIndex,
         burnSubtitles: burn,
+        normalizeAudio: normalize,
         deviceName: this.currentDevice.name,
         resizableSubtitles,
       };
@@ -221,23 +227,46 @@ export class PlaybackController {
     const data = await probe(current.videoPath);
     // A retimed copy is shown as the track it was made from.
     const { source: subs, offset } = this.subtitleTiming(current);
+    const list = describeTracks({
+      streams: data.streams,
+      files: this.torrents.subtitlesOf(current.videoPath),
+      externalPath: this.externalFor(current.videoPath),
+      subtitles: subs,
+      audioIndex: current.audioIndex,
+    });
+    const deviceType = this.currentDevice?.type ?? 'upnp';
+    const bitmap = typeof subs === 'number' && list.subtitles[subs]?.bitmap === true;
     return {
-      ...describeTracks({
-        streams: data.streams,
-        files: this.torrents.subtitlesOf(current.videoPath),
-        externalPath: this.externalFor(current.videoPath),
-        subtitles: subs,
-        audioIndex: current.audioIndex,
-      }),
-      deviceType: this.currentDevice?.type ?? 'upnp',
+      ...list,
+      deviceType,
       subtitleOffset: offset,
+      normalizeAudio: deviceType === 'upnp' ? current.normalizeAudio : undefined,
+      burn:
+        deviceType === 'upnp' && subs !== undefined
+          ? {
+              on: current.burnSubtitles,
+              forced: bitmap ? 'bitmap' : this.scale !== 1 ? 'size' : false,
+            }
+          : undefined,
     };
   }
 
   // Switches audio and/or subtitles of the video playing: a reload where it was.
   async changeTracks(change: TrackChange): Promise<void> {
     const current = this.playing();
-    let { subtitlesPathOrIndex, burnSubtitles } = current;
+    let { subtitlesPathOrIndex, burnSubtitles, normalizeAudio } = current;
+    if (change.normalizeAudio !== undefined) {
+      if (this.currentDevice?.type !== 'upnp') {
+        throw new Error('Only a DLNA TV gets the volume evened out');
+      }
+      normalizeAudio = change.normalizeAudio;
+    }
+    if (change.burnSubtitles !== undefined) {
+      if (this.currentDevice?.type !== 'upnp') {
+        throw new Error('Only a DLNA TV gets subtitles burned in');
+      }
+      burnSubtitles = change.burnSubtitles;
+    }
     if (change.subtitles === null) {
       subtitlesPathOrIndex = undefined;
     } else if (change.subtitles === 'external') {
@@ -266,6 +295,7 @@ export class PlaybackController {
       subtitlesPathOrIndex,
       audioIndex: change.audioIndex ?? current.audioIndex,
       burnSubtitles,
+      normalizeAudio,
     });
   }
 
@@ -328,7 +358,8 @@ export class PlaybackController {
       current.videoPath,
       next.subtitlesPathOrIndex,
       next.audioIndex,
-      next.burnSubtitles
+      next.burnSubtitles,
+      next.normalizeAudio
     );
     // Seeking before the TV has started the new stream is ignored or fails.
     const started = (): boolean => this.lastStatus?.playerState === 'PLAYING';
@@ -343,7 +374,7 @@ export class PlaybackController {
     renderer: Renderer,
     device: KnownDevice,
     videoPath: string,
-    { subtitlesPathOrIndex, audioIndex, burnSubtitles }: LoadOptions
+    { subtitlesPathOrIndex, audioIndex, burnSubtitles, normalizeAudio }: LoadOptions
   ): Promise<boolean> {
     const targetIp = device.ip;
     const probeData = await probe(videoPath);
@@ -377,8 +408,7 @@ export class PlaybackController {
       } else if (burnSubtitles && typeof subtitlesPathOrIndex === 'string') {
         burnSubtitlesArg = {
           source: 'external',
-          path: subtitlesPathOrIndex,
-          charenc: await detectSubtitleCharenc(subtitlesPathOrIndex),
+          ...(await subtitleFileForBurning(subtitlesPathOrIndex)),
         };
       }
 
@@ -388,6 +418,7 @@ export class PlaybackController {
         deviceType: 'upnp',
         burnSubtitles,
         audioIndex,
+        normalizeAudio,
         acceptedVideoMimes: device.acceptedVideoMimes,
         acceptedWildcardVideoMimes: device.acceptedWildcardVideoMimes,
       });
@@ -440,6 +471,8 @@ export class PlaybackController {
         audioTrackIndex: audioIndex,
         hdr: isHdrTransfer(videoStream?.color_transfer),
         subtitleScale: this.scale,
+        normalizeAudio,
+        copyVideo: onlyAudioConverted(compat),
       });
       await renderer.loadVideo({
         title,

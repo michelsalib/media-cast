@@ -23,6 +23,8 @@ export interface ServeVideoOptions {
   audioTrackIndex?: number;
   hdr?: boolean;
   subtitleScale?: number;
+  normalizeAudio?: boolean;
+  copyVideo?: boolean;
 }
 
 export interface ServeSubtitlesOptions {
@@ -41,6 +43,8 @@ export class MediaServer {
   private currentAudioTrackIndex?: number;
   private currentHdr = false;
   private currentSubtitleScale = 1;
+  private currentNormalizeAudio = false;
+  private currentCopyVideo = false;
   private currentSubtitlesData?: Buffer;
   private currentSubtitlesFormat: 'vtt' | 'srt' | 'smi' = 'vtt';
   private sessionHash = randomUUID();
@@ -172,6 +176,8 @@ export class MediaServer {
         audioTrackIndex: this.currentAudioTrackIndex,
         hdr: this.currentHdr,
         subtitleScale: this.currentSubtitleScale,
+        normalizeAudio: this.currentNormalizeAudio,
+        copyVideo: this.currentCopyVideo,
       });
     } catch (err) {
       console.error('[http] transcode failed to start:', err);
@@ -239,6 +245,8 @@ export class MediaServer {
     this.currentAudioTrackIndex = options.audioTrackIndex;
     this.currentHdr = options.hdr ?? false;
     this.currentSubtitleScale = options.subtitleScale ?? 1;
+    this.currentNormalizeAudio = options.normalizeAudio ?? false;
+    this.currentCopyVideo = options.copyVideo ?? false;
     // For direct-played files some DLNA TVs sniff the URL extension, so reflect
     // the source container; transcoded output is always MPEG-TS.
     const ext = options.transcode ? '.ts' : extname(videoPath).toLowerCase() || '';

@@ -63,7 +63,8 @@ export default function PlayingOptionsButton({
     void load();
     const offs = [
       onEvent('nowPlaying', (now) => now && void load()),
-      onEvent('subtitleScale', setScale),
+      // The size decides whether burning in is forced on a DLNA TV.
+      onEvent('subtitleScale', () => void load()),
     ];
     return () => {
       for (const off of offs) off();

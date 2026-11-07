@@ -106,7 +106,11 @@ export default function RemoteApp(): React.JSX.Element {
       connectEvents({
         status: (s) => applyStatus(s, s.currentTime),
         torrents: setStats,
-        subtitleScale: setSubtitleScale,
+        subtitleScale: (scale) => {
+          setSubtitleScale(scale);
+          // The size decides whether burning in is forced on a DLNA TV.
+          remote.tracks().then(setTracks, () => {});
+        },
         nowPlaying: () => void refresh('loaded'),
         scan: () => void refresh('state'),
         context: () => void refresh('state'),

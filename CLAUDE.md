@@ -52,7 +52,7 @@ Two scanners merge into one `knownDevices` map in `index.ts`:
 Each `load` calls `startSession()` for a fresh UUID URL prefix — a reused URI makes TVs (LG) reuse the previous file's cached state. It rotates right before serving, after probe/extract, so the TV can keep reading the old file until then. Two modes per session:
 
 - Direct (Chromecast, and UPnP when `checkCompat` allows) — `send` package, byte-range capable.
-- Transcoded (UPnP) — pipes `ffmpeg` MPEG-TS output. `BurnSubtitles` option burns subs into the video stream (most DLNA TVs don't honor sidecar subs). One encoder at a time: a new GET kills the previous one. Output capped at 1080p.
+- Transcoded (UPnP) — pipes `ffmpeg` MPEG-TS output. `BurnSubtitles` option burns subs into the video stream (most DLNA TVs don't honor sidecar subs). One encoder at a time: a new GET kills the previous one. Output capped at 1080p. "Even out volume" (`normalizeAudio`, a per-play switch like burn-in) adds a compressor + `loudnorm` audio filter; when that is the only reason to transcode (`onlyAudioConverted`), the video is copied (`-c:v copy`) and only the audio re-encoded.
 
 DLNA `protocolInfo` / `contentFeatures.dlna.org` values live in [upnp/dlna.ts](src/main/upnp/dlna.ts) — DIDL and HTTP headers must agree. Never set FLAGS bits 31/27/26 (live-stream semantics).
 
@@ -82,6 +82,7 @@ DLNA `protocolInfo` / `contentFeatures.dlna.org` values live in [upnp/dlna.ts](s
 
 - ffmpeg has no SMI muxer → request SRT then convert in JS (`srtToSmi`).
 - Text subtitles that aren't valid UTF-8 are treated as Windows-1252: decoded in JS for SMI/VTT, `-sub_charenc`/`charenc=CP1252` for ffmpeg. Everything is served as UTF-8.
+- Valid UTF-8 holding C1 controls (U+0080–U+009F) is Windows-1252 a site converted as Latin-1 (`œ` → U+009C, drawn as a box): `repairCp1252AsLatin1` maps them back — on download, when decoding, and in a temp copy for burn-in (`subtitleFileForBurning`, libass reads the file itself).
 - Internal tracks by stream index, external by path.
 
 `load` handler branching: UPnP → burn-in; Chromecast → sidecar WebVTT.

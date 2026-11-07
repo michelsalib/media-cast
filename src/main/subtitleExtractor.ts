@@ -1,5 +1,7 @@
-import { readFile } from 'node:fs/promises';
-import { extname } from 'node:path';
+import { createHash } from 'node:crypto';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { extname, join } from 'node:path';
 import { extractSubtitles as ffmpegExtractSubtitles, type SubtitleFormat } from './ffmpeg';
 
 export async function extractSubtitles(
@@ -73,6 +75,24 @@ export async function detectSubtitleCharenc(path: string): Promise<string | unde
   return isUtf8(bytes) ? undefined : 'CP1252';
 }
 
+// The file libass burns in for a subtitle file: the file itself (with its charset when
+// it isn't UTF-8), or a repaired copy when it has the defect repairCp1252AsLatin1 fixes —
+// libass reads the file on its own, so the repair can't happen on the way.
+export async function subtitleFileForBurning(
+  path: string
+): Promise<{ path: string; charenc?: string }> {
+  const bytes = await readFile(path);
+  if (!isUtf8(bytes)) return { path, charenc: 'CP1252' };
+  const repaired = repairSubtitleBytes(bytes);
+  if (!repaired) return { path };
+  const dir = join(tmpdir(), 'media-cast-subtitles');
+  await mkdir(dir, { recursive: true });
+  const id = createHash('sha1').update(path).digest('hex').slice(0, 16);
+  const copy = join(dir, `${id}${extname(path)}`);
+  await writeFile(copy, repaired);
+  return { path: copy };
+}
+
 function isUtf8(bytes: Buffer): boolean {
   try {
     new TextDecoder('utf-8', { fatal: true }).decode(bytes);
@@ -83,7 +103,27 @@ function isUtf8(bytes: Buffer): boolean {
 }
 
 function decodeText(bytes: Buffer): string {
-  return new TextDecoder(isUtf8(bytes) ? 'utf-8' : 'windows-1252').decode(bytes);
+  return isUtf8(bytes)
+    ? repairCp1252AsLatin1(new TextDecoder('utf-8').decode(bytes))
+    : new TextDecoder('windows-1252').decode(bytes);
+}
+
+// A Windows-1252 file converted to UTF-8 as if it were Latin-1 (some subtitle sites do
+// this) turns œ ’ … € into C1 control characters, U+0080–U+009F, drawn as boxes. No
+// subtitle text uses those, so each is read back as the Windows-1252 byte it was.
+export function repairCp1252AsLatin1(text: string): string {
+  return text.replace(/[-]/g, (c) => CP1252.decode(Uint8Array.of(c.charCodeAt(0))));
+}
+
+const CP1252 = new TextDecoder('windows-1252');
+
+// The same repair on a file's bytes; undefined when there is nothing to repair.
+export function repairSubtitleBytes(bytes: Uint8Array): Buffer | undefined {
+  const buffer = Buffer.from(bytes);
+  if (!isUtf8(buffer)) return undefined;
+  const text = buffer.toString('utf8');
+  const repaired = repairCp1252AsLatin1(text);
+  return repaired === text ? undefined : Buffer.from(repaired, 'utf8');
 }
 
 export interface SrtCue {

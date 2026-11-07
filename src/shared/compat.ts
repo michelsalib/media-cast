@@ -33,7 +33,7 @@ export const CONTAINER_MIMES: Record<string, readonly string[]> = {
 export const DIRECT_PLAY_CONTAINERS_FALLBACK = new Set(['.mp4']);
 
 export type CompatIssueKind =
-  'container' | 'videoCodec' | 'audioCodec' | 'subtitles' | 'audioTrack';
+  'container' | 'videoCodec' | 'audioCodec' | 'subtitles' | 'audioTrack' | 'audioLevel';
 
 export interface CompatIssue {
   kind: CompatIssueKind;
@@ -57,6 +57,8 @@ export interface CompatInput {
   deviceType: DeviceType;
   burnSubtitles: boolean;
   audioIndex: number | undefined;
+  // Even out the volume: the audio goes through ffmpeg (DLNA only).
+  normalizeAudio?: boolean;
   // MIMEs the renderer advertised in its ConnectionManager Sink. Empty/undefined
   // means we never got a usable answer — fall back to the static container list.
   acceptedVideoMimes?: readonly string[];
@@ -72,6 +74,7 @@ export function checkCompat(input: CompatInput): CompatReport {
     deviceType,
     burnSubtitles,
     audioIndex,
+    normalizeAudio = false,
     acceptedVideoMimes,
     acceptedWildcardVideoMimes,
   } = input;
@@ -93,6 +96,10 @@ export function checkCompat(input: CompatInput): CompatReport {
       kind: 'subtitles',
       detail: 'Burning subtitles into the video stream',
     });
+  }
+
+  if (normalizeAudio) {
+    issues.push({ kind: 'audioLevel', detail: 'Evening out the volume re-encodes the audio' });
   }
 
   if (audioIndex !== undefined && audioIndex !== 0) {
@@ -164,6 +171,20 @@ export function checkCompat(input: CompatInput): CompatReport {
     videoMimeType: issues.length > 0 ? undefined : videoMimeType,
     issues,
   };
+}
+
+// Codecs an MPEG-TS stream carries that DLNA TVs decode, for copying the video as is.
+const TS_COPY_VIDEO_CODECS = new Set(['h264', 'hevc']);
+
+// Whether only the audio needs ffmpeg: the TV takes the video as it is (nothing but the
+// volume levelling stands in the way of direct play), so it is copied, not re-encoded.
+export function onlyAudioConverted(report: CompatReport): boolean {
+  return (
+    report.issues.length > 0 &&
+    report.issues.every((i) => i.kind === 'audioLevel') &&
+    !!report.videoCodec &&
+    TS_COPY_VIDEO_CODECS.has(report.videoCodec)
+  );
 }
 
 function pickVideoMime(

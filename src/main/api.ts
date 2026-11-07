@@ -87,8 +87,10 @@ export function createMainApi({
       videoPath: string,
       subtitlesPathOrIndex?: string | number,
       audioIndex?: number,
-      burnSubtitles?: boolean
-    ) => controller.load(videoPath, subtitlesPathOrIndex, audioIndex, burnSubtitles),
+      burnSubtitles?: boolean,
+      normalizeAudio?: boolean
+    ) =>
+      controller.load(videoPath, subtitlesPathOrIndex, audioIndex, burnSubtitles, normalizeAudio),
     play: () => controller.play(),
     pause: () => controller.pause(),
     seek: (time: number) => controller.seek(time),

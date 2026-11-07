@@ -35,7 +35,14 @@ import type {
 } from '../../../shared/types';
 import type { Connection } from '../App';
 import { api, errorMessage, onEvent, pathFor } from '../ipc';
-import { episodeLabel, resolutionLabel, runtimeLabel, subtitleFileName } from '../labels';
+import {
+  burnHint,
+  episodeLabel,
+  NORMALIZE_AUDIO_HINT,
+  resolutionLabel,
+  runtimeLabel,
+  subtitleFileName,
+} from '../labels';
 import { cardSx, linkSx, tonalSx } from '../theme';
 import { Artwork, useObjectUrl } from './Artwork';
 import AudioSelector from './AudioSelector';
@@ -86,6 +93,8 @@ export default function Dropper({
   const [probeData, setProbeData] = useState<FFProbeData | undefined>(undefined);
   const [release, setRelease] = useState<ReleaseInfo | undefined>();
   const [burnSubtitles, setBurnSubtitles] = useState(false);
+  // Kept for the next videos, like burnSubtitles; applies on DLNA only.
+  const [normalizeAudio, setNormalizeAudio] = useState(false);
   const [casting, setCasting] = useState(false);
   const [castError, setCastError] = useState<string | undefined>();
   const [searchOpen, setSearchOpen] = useState(false);
@@ -318,8 +327,9 @@ export default function Dropper({
       acceptedWildcardVideoMimes: device.acceptedWildcardVideoMimes,
       burnSubtitles: effectiveBurn,
       audioIndex: audioSelection?.index,
+      normalizeAudio: device.type === 'upnp' && normalizeAudio,
     });
-  }, [video, probeData, device, effectiveBurn, audioSelection]);
+  }, [video, probeData, device, effectiveBurn, audioSelection, normalizeAudio]);
 
   const thumbnailUrl = useObjectUrl(thumbnail);
   const nowPlayingUrl = useObjectUrl(nowPlaying?.thumbnail);
@@ -373,7 +383,8 @@ export default function Dropper({
         video.path,
         subtitlesArg(subtitlesSelection),
         audioSelection?.index,
-        burnOn(target)
+        burnOn(target),
+        target.type === 'upnp' && normalizeAudio
       );
       setNowPlaying({ thumbnail, title, details, infoHash: video.infoHash });
       setBrowsing(false);
@@ -582,6 +593,22 @@ export default function Dropper({
                       value={audioSelection}
                       onChange={selection.chooseAudio}
                     />
+                    {device?.type === 'upnp' && (
+                      <Tooltip placement="top" enterDelay={300} title={NORMALIZE_AUDIO_HINT}>
+                        <FormControlLabel
+                          control={
+                            <Switch
+                              size="small"
+                              checked={normalizeAudio}
+                              onChange={(e) => setNormalizeAudio(e.target.checked)}
+                            />
+                          }
+                          label="Even out volume"
+                          slotProps={{ typography: { sx: { fontSize: 13 } } }}
+                          sx={{ m: 0, gap: 0.5, alignSelf: 'flex-start' }}
+                        />
+                      </Tooltip>
+                    )}
                   </Section>
                 )}
                 <Section
@@ -645,13 +672,7 @@ export default function Dropper({
                     <Tooltip
                       placement="top"
                       enterDelay={300}
-                      title={
-                        bitmapSubs
-                          ? 'These subtitles are images (e.g. Blu-ray PGS) — they can only be shown by burning them into the video.'
-                          : forceBurn
-                            ? 'The TV shows subtitle files at its own size: to change their size, they are burned into the video. Set the size back to Normal to send them as a file.'
-                            : 'Re-encodes the video to embed subtitles. Needed only for TVs that ignore separate subtitle files.'
-                      }
+                      title={burnHint(bitmapSubs ? 'bitmap' : forceBurn ? 'size' : false)}
                     >
                       <FormControlLabel
                         control={

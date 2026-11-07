@@ -10,7 +10,12 @@ import type {
   SubtitleSearchResult,
   SubtitleTiming,
 } from '../../shared/subtitleSearch';
-import { extractSubtitles, parseSrt, TEXT_SUBTITLE_EXTENSIONS } from '../subtitleExtractor';
+import {
+  extractSubtitles,
+  parseSrt,
+  repairSubtitleBytes,
+  TEXT_SUBTITLE_EXTENSIONS,
+} from '../subtitleExtractor';
 import { sourceStem } from '../videoSource';
 import { movieHash } from './movieHash';
 import { ProviderSkipped, type SubtitleProvider } from './provider';
@@ -95,7 +100,8 @@ export async function downloadSubtitle(
   const dir = join(await cacheDir(), id.slice(0, 12));
   await mkdir(dir, { recursive: true });
   const path = join(dir, safeFileName(fileName));
-  await writeFile(path, data);
+  // Repaired on disk, not only when served: burning in reads the file itself.
+  await writeFile(path, repairSubtitleBytes(data) ?? data);
   return { path, name: basename(path) };
 }
 

@@ -102,6 +102,8 @@ export interface NowPlaying {
   subtitlesPathOrIndex?: string | number;
   audioIndex?: number;
   burnSubtitles: boolean;
+  // Volume evened out (DLNA only): the audio goes through ffmpeg.
+  normalizeAudio: boolean;
   deviceName: string;
   // Whether the subtitle size can change on the TV: any subtitles playing (a Chromecast
   // restyles them; on a DLNA TV a size other than Normal burns them in).
@@ -125,6 +127,11 @@ export interface PlayingTracks extends TrackList {
   deviceType: DeviceType;
   // Seconds the subtitles playing are shifted from their original timing (0: as is).
   subtitleOffset: number;
+  // On a DLNA TV with subtitles playing: whether they are burned into the picture, and
+  // whether that is forced (image subtitles, or a size other than Normal).
+  burn?: { on: boolean; forced: 'bitmap' | 'size' | false };
+  // On a DLNA TV: whether the volume is evened out.
+  normalizeAudio?: boolean;
 }
 
 // Picked subtitles: a track index, the added file, a file of the torrent (by index in
@@ -135,6 +142,10 @@ export type SubtitleChoice = number | 'external' | `file:${number}` | null;
 export interface TrackChange {
   subtitles?: SubtitleChoice;
   audioIndex?: number;
+  // DLNA only: burn the subtitles playing into the picture, or send them as a file.
+  burnSubtitles?: boolean;
+  // DLNA only: even out the volume, or play the audio as it is.
+  normalizeAudio?: boolean;
 }
 
 // The phone remote's switch and the addresses a phone can open it on.

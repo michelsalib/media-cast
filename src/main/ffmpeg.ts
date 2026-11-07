@@ -198,7 +198,23 @@ export interface TranscodeOptions {
   hdr?: boolean;
   // Burned-in text subtitles, as a scale of their own size; 1 = as authored.
   subtitleScale?: number;
+  // Evens out the volume (see EVEN_OUT_AUDIO_FILTER).
+  normalizeAudio?: boolean;
+  // The TV plays the video as it is: only the audio is re-encoded. Nothing else may touch
+  // the picture (no burn-in, scaling, tone map), and seeks land on the keyframe before.
+  copyVideo?: boolean;
 }
+
+// Downmix first, then compress (quiet dialog up, peaks down) and level everything to
+// -16 LUFS with a 7 LU range: films mixed for a cinema, or downmixed quietly (YIFY sits
+// near -33 LUFS), come out at TV loudness with dialog and effects closer together.
+// loudnorm's single-pass mode looks 3 s ahead, adds that to the start, and outputs
+// 192 kHz (-ar brings it back to 48 kHz).
+const EVEN_OUT_AUDIO_FILTER = [
+  'aformat=channel_layouts=stereo',
+  'acompressor=threshold=0.1:ratio=3:attack=20:release=250:makeup=2',
+  'loudnorm=I=-16:LRA=7:TP=-2',
+].join(',');
 
 // Never encode above 1080p. A 4K H.264 stream is outside what High@4.x TV decoders
 // accept, and libx264 at 4K (or with the float tone map) runs slower than real time on
@@ -211,7 +227,8 @@ export interface TranscodeHandle {
 }
 
 /**
- * Transcodes any video to H.264 + AAC in an MPEG-TS stream piped on stdout.
+ * Transcodes any video to H.264 + AAC in an MPEG-TS stream piped on stdout (or, with
+ * `copyVideo`, only the audio, the video copied as is).
  * Tuned for old DLNA TV decoders: ≤1080p, High@4.0/4.2, VBV-capped, 8-bit 4:2:0.
  * Returns a Readable for the caller to pipe somewhere, plus a kill function.
  */
@@ -225,6 +242,8 @@ export async function transcodeToMpegTs(options: TranscodeOptions): Promise<Tran
     audioTrackIndex = 0,
     hdr = false,
     subtitleScale = 1,
+    normalizeAudio = false,
+    copyVideo = false,
   } = options;
   const downscaled =
     !!videoSize && (videoSize.width > MAX_OUTPUT.width || videoSize.height > MAX_OUTPUT.height);
@@ -253,7 +272,9 @@ export async function transcodeToMpegTs(options: TranscodeOptions): Promise<Tran
   videoFilters.push('crop=trunc(iw/16)*16:trunc(ih/16)*16');
   const croppedSize = videoSize ? alignTo16(fitWithin(videoSize, MAX_OUTPUT)) : undefined;
 
-  if (burnSubtitles?.source === 'internal' && burnSubtitles.bitmap) {
+  if (copyVideo) {
+    args.push('-map', '0:v:0');
+  } else if (burnSubtitles?.source === 'internal' && burnSubtitles.bitmap) {
     const graph = buildBitmapOverlayGraph(
       videoFilters,
       burnSubtitles.trackIndex,
@@ -270,36 +291,44 @@ export async function transcodeToMpegTs(options: TranscodeOptions): Promise<Tran
     args.push('-vf', videoFilters.join(','), '-map', '0:v:0');
   }
 
+  args.push('-map', `0:a:${audioTrackIndex}?`);
+  if (copyVideo) {
+    args.push('-c:v', 'copy');
+  } else {
+    args.push(
+      '-c:v',
+      'libx264',
+      // Downscaling and tone mapping eat into the real-time budget; trade a little
+      // compression efficiency for speed there.
+      '-preset',
+      downscaled || hdr ? 'superfast' : 'veryfast',
+      '-profile:v',
+      'high',
+      // 4.0 covers 1080p30; 1080p50/60 needs 4.2. x264 only writes the label, so it has
+      // to match what the stream really is or strict decoders reject it.
+      '-level',
+      frameRate && frameRate > 30 ? '4.2' : '4.0',
+      '-pix_fmt',
+      'yuv420p',
+      '-g',
+      '60',
+      // -level alone only labels the stream; without VBV, x264's CRF bitrate is unbounded
+      // and grainy scenes overshoot what the TV's buffer (and Wi-Fi) sustain. Cap well
+      // under High@4.0's 25 Mb/s.
+      '-maxrate',
+      '12M',
+      '-bufsize',
+      '24M',
+      // Disable sliced threading: per-slice corruption on weak decoders shows as a band of
+      // garbage (~1/4 of the screen). Frame-level threading still works.
+      '-x264-params',
+      'sliced-threads=0'
+    );
+  }
+  if (normalizeAudio) {
+    args.push('-af', EVEN_OUT_AUDIO_FILTER);
+  }
   args.push(
-    '-map',
-    `0:a:${audioTrackIndex}?`,
-    '-c:v',
-    'libx264',
-    // Downscaling and tone mapping eat into the real-time budget; trade a little
-    // compression efficiency for speed there.
-    '-preset',
-    downscaled || hdr ? 'superfast' : 'veryfast',
-    '-profile:v',
-    'high',
-    // 4.0 covers 1080p30; 1080p50/60 needs 4.2. x264 only writes the label, so it has
-    // to match what the stream really is or strict decoders reject it.
-    '-level',
-    frameRate && frameRate > 30 ? '4.2' : '4.0',
-    '-pix_fmt',
-    'yuv420p',
-    '-g',
-    '60',
-    // -level alone only labels the stream; without VBV, x264's CRF bitrate is unbounded
-    // and grainy scenes overshoot what the TV's buffer (and Wi-Fi) sustain. Cap well
-    // under High@4.0's 25 Mb/s.
-    '-maxrate',
-    '12M',
-    '-bufsize',
-    '24M',
-    // Disable sliced threading: per-slice corruption on weak decoders shows as a band of
-    // garbage (~1/4 of the screen). Frame-level threading still works.
-    '-x264-params',
-    'sliced-threads=0',
     '-c:a',
     'aac',
     '-ar',

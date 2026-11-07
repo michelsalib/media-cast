@@ -89,6 +89,19 @@ export function subtitleFileName(label: string): string {
   return (lang ? [lang, ...rest].join(' ') : label) || 'Subtitles';
 }
 
+// What evening out the volume does (DLNA only).
+export const NORMALIZE_AUDIO_HINT =
+  'Brings quiet dialog up and loud scenes down, at the usual TV loudness. Only the sound is re-encoded.';
+
+// Why subtitles are or can be burned into the picture on a DLNA TV.
+export function burnHint(forced: 'bitmap' | 'size' | false): string {
+  return forced === 'bitmap'
+    ? 'These subtitles are images (e.g. Blu-ray PGS) — they can only be shown by burning them into the video.'
+    : forced === 'size'
+      ? 'The TV shows subtitle files at its own size: to change their size, they are burned into the video. Set the size back to Normal to send them as a file.'
+      : 'Re-encodes the video to embed subtitles. Needed only for TVs that ignore separate subtitle files.';
+}
+
 // "English", "English · SDH", or the track title alone when it already names the language.
 export function subtitleTrackName(track: { language?: string; title?: string }, i: number): string {
   const lang = languageName(track.language);
