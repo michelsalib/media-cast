@@ -2,7 +2,7 @@ import type { SubtitleSearchResult } from '../../../shared/subtitleSearch';
 import {
   fetchOk,
   fileNameFromDisposition,
-  ProviderSkipped,
+  MissingApiKey,
   type SearchContext,
   type SubtitleProvider,
 } from '../provider';
@@ -29,7 +29,7 @@ export const subdl: SubtitleProvider = {
   async search({ query, settings }: SearchContext): Promise<SubtitleSearchResult[]> {
     const { apiKey } = settings.subdl;
     if (!apiKey) {
-      throw new ProviderSkipped('No API key — add a free one in settings');
+      throw new MissingApiKey('No API key — add a free one in settings');
     }
     const params = new URLSearchParams({
       api_key: apiKey,

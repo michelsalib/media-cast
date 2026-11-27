@@ -1,8 +1,96 @@
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { extname, join } from 'node:path';
-import { extractSubtitles as ffmpegExtractSubtitles, type SubtitleFormat } from './ffmpeg';
+import { isBitmapSubtitleCodec } from '../shared/subtitles';
+import {
+  copySubtitleTrack,
+  extractSubtitles as ffmpegExtractSubtitles,
+  probe,
+  type SubtitleFormat,
+} from './ffmpeg';
+import { isUrlSource } from './videoSource';
+
+const FONT_FILE = /\.(ttf|otf|ttc|woff2?)$/i;
+
+type LocalTrack = { path: string; fontsDir: string };
+
+// Internal text tracks of a video read over HTTP (a torrent), by video and track. `abort`
+// stops a copy still running; a failed or stopped one is dropped, so the next read retries.
+const localTracks = new Map<string, { copying: Promise<LocalTrack>; abort: AbortController }>();
+
+// Where copies go: set at startup to a folder in the torrents' own, wiped with them.
+let copiesDir: string | undefined;
+
+export function configureSubtitleCopies(dir: string): void {
+  copiesDir = dir;
+}
+
+function trackKey(videoPath: string, trackIndex: number): string {
+  return `${videoPath}\n${trackIndex}`;
+}
+
+// An internal text track of a torrent's video, copied to a local file with the fonts the
+// video carries, once. Every read of a track (and libass, at each encoder start when
+// burning in) goes through the whole video: over a torrent that is minutes of download,
+// and it competed with the stream playing.
+export function localSubtitleTrack(videoPath: string, trackIndex: number): Promise<LocalTrack> {
+  const key = trackKey(videoPath, trackIndex);
+  const running = localTracks.get(key);
+  if (running) return running.copying;
+  const abort = new AbortController();
+  const copying = (async () => {
+    if (!copiesDir) throw new Error('Subtitle copies have no folder');
+    const { streams } = await probe(videoPath);
+    const track = streams.filter((s) => s.codec_type === 'subtitle')[trackIndex];
+    if (!track) throw new Error('This subtitle track is not in the video');
+    // Before reading the whole torrent for nothing: ffmpeg can't turn pictures into text.
+    if (isBitmapSubtitleCodec(track.codec_name)) {
+      throw new Error('These subtitles are pictures, not text: they can only be burned in');
+    }
+    const id = createHash('sha1').update(key).digest('hex').slice(0, 16);
+    const dir = join(copiesDir, id);
+    const fontsDir = join(dir, 'fonts');
+    await mkdir(fontsDir, { recursive: true });
+    // Named by us: an attachment's own file name comes from the torrent.
+    const fonts = streams
+      .filter(
+        (s) =>
+          s.codec_type === 'attachment' &&
+          (/font|truetype|opentype/i.test(s.tags?.mimetype ?? '') ||
+            FONT_FILE.test(s.tags?.filename ?? ''))
+      )
+      .map((s) => ({
+        index: s.index,
+        path: join(fontsDir, `${s.index}${FONT_FILE.exec(s.tags?.filename ?? '')?.[0] ?? '.ttf'}`),
+      }));
+    const styled = track.codec_name === 'ass' || track.codec_name === 'ssa';
+    const path = join(dir, styled ? 'track.ass' : 'track.srt');
+    try {
+      await copySubtitleTrack(videoPath, trackIndex, path, fonts, abort.signal);
+    } catch (err) {
+      // Never left for a later read to take as the whole track.
+      await rm(dir, { recursive: true, force: true }).catch(() => {});
+      throw abort.signal.aborted ? new Error('Reading the subtitles was cancelled') : err;
+    }
+    return { path, fontsDir };
+  })();
+  const entry = { copying, abort };
+  localTracks.set(key, entry);
+  copying.catch(() => {
+    if (localTracks.get(key) === entry) localTracks.delete(key);
+  });
+  return copying;
+}
+
+// Stops the copies still running, except the track named: each downloads a whole torrent,
+// and would compete with what plays next (Stop, another video or track picked).
+export function cancelSubtitleCopies(keep?: { videoPath: string; trackIndex: number }): void {
+  const kept = keep && trackKey(keep.videoPath, keep.trackIndex);
+  for (const [key, { abort }] of localTracks) {
+    if (key !== kept) abort.abort();
+  }
+}
 
 export async function extractSubtitles(
   videoPath: string,
@@ -35,6 +123,10 @@ async function readRaw(
   }
 
   if (typeof subtitlesPathOrIndex === 'number') {
+    if (isUrlSource(videoPath)) {
+      const { path } = await localSubtitleTrack(videoPath, subtitlesPathOrIndex);
+      return ffmpegExtractSubtitles({ source: 'external', path }, format);
+    }
     return ffmpegExtractSubtitles(
       { source: 'internal', videoPath, trackIndex: subtitlesPathOrIndex },
       format

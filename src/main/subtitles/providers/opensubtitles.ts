@@ -3,7 +3,7 @@ import type { SubtitleSearchResult } from '../../../shared/subtitleSearch';
 import {
   fetchOk,
   HttpError,
-  ProviderSkipped,
+  MissingApiKey,
   type SearchContext,
   type SubtitleProvider,
 } from '../provider';
@@ -51,7 +51,7 @@ function headers(apiKey: string, token?: string): Record<string, string> {
 function requireKey(settings: SubtitleSettings): string {
   const { apiKey } = settings.opensubtitles;
   if (!apiKey) {
-    throw new ProviderSkipped('No API key — add one in settings');
+    throw new MissingApiKey('No API key — add one in settings');
   }
   return apiKey;
 }

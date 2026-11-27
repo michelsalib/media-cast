@@ -57,7 +57,11 @@ export default function SubtitleSearchDialog({ open, backend, onClose }: Props):
       backend
         .search(query)
         .then(setResponse)
-        .catch((err: unknown) => setError(errorMessage(err)))
+        .catch((err: unknown) => {
+          // Not the previous search's results and notices next to this one's error.
+          setResponse(undefined);
+          setError(errorMessage(err));
+        })
         .finally(() => setSearching(false));
     },
     [backend]
@@ -118,6 +122,13 @@ export default function SubtitleSearchDialog({ open, backend, onClose }: Props):
 
   const exact = response?.results.filter((r) => r.hashMatch) ?? [];
   const others = response?.results.filter((r) => !r.hashMatch) ?? [];
+  // Sites skipped for want of an API key: said up front, since without keys a search
+  // finds little or nothing and the title would look like the culprit.
+  const missingKeys = response?.notices.filter((n) => n.missingKey) ?? [];
+  const otherNotices = response?.notices.filter((n) => !n.missingKey) ?? [];
+  // Every site without a notice was searched; with none, the notices say why.
+  const searchedSites =
+    Object.keys(SUBTITLE_PROVIDER_NAMES).length - (response?.notices.length ?? 0);
 
   return (
     <Drawer
@@ -229,9 +240,28 @@ export default function SubtitleSearchDialog({ open, backend, onClose }: Props):
       <Stack spacing={1} sx={{ flex: 1, minHeight: 0, overflowY: 'auto', px: 2, pb: 2 }}>
         {error && <Alert severity="error">{error}</Alert>}
 
-        {response && !searching && response.results.length === 0 && (
+        {missingKeys.length > 0 && !searching && (
+          <Alert
+            severity={response?.results.length ? 'info' : 'warning'}
+            action={
+              backend.settings ? (
+                <Button color="inherit" size="small" onClick={() => setSettingsOpen(true)}>
+                  Add keys
+                </Button>
+              ) : undefined
+            }
+          >
+            {missingKeyMessage(
+              missingKeys.map((n) => SUBTITLE_PROVIDER_NAMES[n.provider]),
+              backend.settings
+            )}
+          </Alert>
+        )}
+
+        {response && !searching && response.results.length === 0 && searchedSites > 0 && (
           <Typography sx={{ color: 'text.secondary', textAlign: 'center', py: 4 }}>
-            Nothing found. Try fixing the title, or clearing the year.
+            {missingKeys.length > 0 ? 'Nothing found on the sites searched.' : 'Nothing found.'} Try
+            fixing the title, or clearing the year.
           </Typography>
         )}
 
@@ -261,12 +291,12 @@ export default function SubtitleSearchDialog({ open, backend, onClose }: Props):
         ))}
       </Stack>
 
-      {!!response?.notices.length && (
+      {otherNotices.length > 0 && (
         <Stack
           spacing={0.25}
           sx={{ px: 3, py: 1.75, borderTop: '1px solid', borderColor: 'divider' }}
         >
-          {response.notices.map((n) => (
+          {otherNotices.map((n) => (
             <Typography key={n.provider} sx={{ fontSize: 12, color: 'text.secondary' }}>
               {SUBTITLE_PROVIDER_NAMES[n.provider]}: {n.message}
             </Typography>
@@ -284,6 +314,13 @@ export default function SubtitleSearchDialog({ open, backend, onClose }: Props):
       />
     </Drawer>
   );
+}
+
+// "OpenSubtitles and Subdl weren't searched: they need a free API key."
+function missingKeyMessage(names: string[], settingsHere: boolean): string {
+  const many = names.length > 1;
+  const where = settingsHere ? '' : ', set in Media Cast on the computer';
+  return `${names.join(' and ')} ${many ? "weren't" : "wasn't"} searched: ${many ? 'they need' : 'it needs'} a free API key${where}.`;
 }
 
 function GroupLabel({ children }: { children: React.ReactNode }): React.JSX.Element {

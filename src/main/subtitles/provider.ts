@@ -28,6 +28,9 @@ export interface SubtitleProvider {
 // Shown as a notice, not an error.
 export class ProviderSkipped extends Error {}
 
+// Skipped for want of an API key: the search dialog points to the settings.
+export class MissingApiKey extends ProviderSkipped {}
+
 const TIMEOUT_MS = 20_000;
 
 export async function fetchOk(url: string, init: RequestInit = {}): Promise<Response> {

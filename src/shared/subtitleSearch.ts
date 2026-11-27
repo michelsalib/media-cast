@@ -33,7 +33,8 @@ export interface SubtitleSearchResult {
 export interface SubtitleSearchResponse {
   results: SubtitleSearchResult[];
   // One entry per provider that failed or was skipped, shown next to the results.
-  notices: { provider: SubtitleProviderId; message: string }[];
+  // `missingKey`: not searched for want of an API key.
+  notices: { provider: SubtitleProviderId; message: string; missingKey?: boolean }[];
 }
 
 export interface SubtitleCue {

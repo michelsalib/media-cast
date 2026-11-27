@@ -132,6 +132,10 @@ export class UpnpPlayer implements Renderer {
   }
 
   async seek(time: number): Promise<void> {
+    // A seek is a transition: until the previous one (or a load) has settled, LG answers
+    // UPnP 701 "Transition not available". Briefly: an LG can stay in LG_TRANSITIONING
+    // while it buffers, and a seek held past that is one the user feels.
+    await this.waitWhileTransitioning(2_000);
     await soapCall(this.controlUrl, 'Seek', {
       InstanceID: '0',
       Unit: 'REL_TIME',

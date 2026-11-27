@@ -18,7 +18,7 @@ import {
 } from '../subtitleExtractor';
 import { sourceStem } from '../videoSource';
 import { movieHash } from './movieHash';
-import { ProviderSkipped, type SubtitleProvider } from './provider';
+import { MissingApiKey, ProviderSkipped, type SubtitleProvider } from './provider';
 import { gestdown } from './providers/gestdown';
 import { openSubtitles } from './providers/opensubtitles';
 import { subdl } from './providers/subdl';
@@ -55,6 +55,7 @@ export async function searchSubtitles(
       response.notices.push({
         provider,
         message: err instanceof Error ? err.message : String(err),
+        ...(err instanceof MissingApiKey ? { missingKey: true } : {}),
       });
     }
   });

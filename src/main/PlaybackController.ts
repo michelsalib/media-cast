@@ -23,12 +23,17 @@ import {
   type SubtitleSource,
 } from './ffmpeg';
 import type { MediaServer } from './MediaServer';
-import { extractSubtitles, subtitleFileForBurning } from './subtitleExtractor';
+import {
+  cancelSubtitleCopies,
+  extractSubtitles,
+  localSubtitleTrack,
+  subtitleFileForBurning,
+} from './subtitleExtractor';
 import { retimeSubtitles, subtitleCues } from './subtitles/search';
 import type { TorrentStore } from './torrents';
 import type { UpnpDevice } from './upnp/DevicesScanner';
 import { UpnpPlayer } from './upnp/Player';
-import { sourceName } from './videoSource';
+import { isUrlSource, sourceName } from './videoSource';
 
 type KnownDevice = ChromecastDevice | UpnpDevice;
 
@@ -56,6 +61,10 @@ export class PlaybackController {
   // The retimed copy playing in place of `original`, shifted by `offset` seconds.
   private timing?: { videoPath: string; path: string; original: string | number; offset: number };
   private loading = false;
+  private seeking?: Promise<void>;
+  // The next seek to send, and the latest asked (sent or not) until all are done.
+  private seekTarget?: number;
+  private seekingTo?: number;
   private polling = false;
   // While the TV has a video, this computer is what serves it: a sleep would cut it off.
   private sleepBlocker?: number;
@@ -149,6 +158,11 @@ export class PlaybackController {
         this.scale !== 1);
     // Only a DLNA stream goes through ffmpeg; a Chromecast plays the file as it is.
     const normalize = normalizeAudio && this.currentDevice.type === 'upnp';
+    cancelSubtitleCopies(
+      typeof subtitlesPathOrIndex === 'number'
+        ? { videoPath, trackIndex: subtitlesPathOrIndex }
+        : undefined
+    );
     try {
       const resizableSubtitles = await this.loadOn(this.renderer, this.currentDevice, videoPath, {
         subtitlesPathOrIndex,
@@ -212,8 +226,10 @@ export class PlaybackController {
     return this.lastStatus;
   }
 
-  // Where playback is now: the last status, run forward while playing.
+  // Where playback is now: the last status, run forward while playing — or where a seek
+  // not yet done goes, so a reload or resize meanwhile doesn't send the TV back.
   position(): number {
+    if (this.seekingTo !== undefined) return this.seekingTo;
     const s = this.lastStatus;
     if (!s) return 0;
     const elapsed = s.playerState === 'PLAYING' ? (Date.now() - this.lastStatusAt) / 1000 : 0;
@@ -407,12 +423,20 @@ export class PlaybackController {
         const bitmap = isBitmapSubtitleCodec(subtitleStream?.codec_name)
           ? { canvas: await probeSubtitleCanvas(videoPath, subtitlesPathOrIndex) }
           : undefined;
-        burnSubtitlesArg = {
-          source: 'internal',
-          videoPath,
-          trackIndex: subtitlesPathOrIndex,
-          bitmap,
-        };
+        // libass reads a text track through the whole video at each encoder start (each
+        // seek): a torrent's is burned in from a local copy.
+        burnSubtitlesArg =
+          !bitmap && isUrlSource(videoPath)
+            ? {
+                source: 'external',
+                ...(await localSubtitleTrack(videoPath, subtitlesPathOrIndex)),
+              }
+            : {
+                source: 'internal',
+                videoPath,
+                trackIndex: subtitlesPathOrIndex,
+                bitmap,
+              };
       } else if (burnSubtitles && typeof subtitlesPathOrIndex === 'string') {
         burnSubtitlesArg = {
           source: 'external',
@@ -531,8 +555,33 @@ export class PlaybackController {
     await this.renderer?.pause();
   }
 
+  // One seek at a time, and only the latest of those asked meanwhile: a TV answers a seek
+  // sent while it still buffers the previous one with an error (UPnP 701, an HTTP 500),
+  // and each one it does take restarts the stream. Every caller gets the last one's outcome.
   async seek(time: number): Promise<void> {
-    await this.renderer?.seek(time);
+    this.seekTarget = time;
+    this.seekingTo = time;
+    this.seeking ??= (async () => {
+      // A seek left over for a TV disconnected meanwhile isn't sent to the next one.
+      const renderer = this.renderer;
+      try {
+        let failure: unknown;
+        while (this.seekTarget !== undefined && this.renderer === renderer) {
+          const target = this.seekTarget;
+          this.seekTarget = undefined;
+          failure = await renderer?.seek(target).then(
+            () => undefined,
+            (err: unknown) => err ?? new Error('Seek failed')
+          );
+        }
+        if (failure) throw failure;
+      } finally {
+        this.seeking = undefined;
+        this.seekTarget = undefined;
+        this.seekingTo = undefined;
+      }
+    })();
+    await this.seeking;
   }
 
   async close(): Promise<void> {
@@ -552,6 +601,9 @@ export class PlaybackController {
 
   private async teardown(): Promise<void> {
     this.keepAwake(false);
+    cancelSubtitleCopies();
+    this.seekTarget = undefined;
+    this.seekingTo = undefined;
     if (this.statusInterval) {
       clearInterval(this.statusInterval);
       this.statusInterval = undefined;

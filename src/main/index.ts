@@ -33,6 +33,7 @@ import { createRemoteApi } from './remote/api';
 import { RemoteHub } from './remote/RemoteHub';
 import { RemoteServer } from './remote/RemoteServer';
 import { openedItems, refreshShellIntegration } from './shellIntegration';
+import { configureSubtitleCopies } from './subtitleExtractor';
 import { TorrentStore } from './torrents';
 import { type UpnpDevice, UpnpDevicesScanner } from './upnp/DevicesScanner';
 
@@ -125,7 +126,9 @@ app.whenReady().then(() => {
   const upnpScanner = new UpnpDevicesScanner();
   const server = new MediaServer(port);
   const preview = new PreviewServer();
-  const torrents = new TorrentStore(join(app.getPath('temp'), 'media-cast-torrents'));
+  const torrentsDir = join(app.getPath('temp'), 'media-cast-torrents');
+  const torrents = new TorrentStore(torrentsDir);
+  configureSubtitleCopies(join(torrentsDir, '.tracks'));
   const torrentTicker = setInterval(() => {
     if (torrents.size > 0) sendEvent(mainWindow, 'torrents', torrents.stats());
   }, 1000);

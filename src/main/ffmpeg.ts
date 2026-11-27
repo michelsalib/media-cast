@@ -1,4 +1,5 @@
 import { execFile, spawn } from 'node:child_process';
+import { extname } from 'node:path';
 import type { Readable } from 'node:stream';
 import { promisify } from 'node:util';
 
@@ -32,7 +33,7 @@ export interface FFProbeData {
     index: number;
     codec_name: string;
     codec_long_name: string;
-    codec_type: 'subtitle' | 'audio' | 'video';
+    codec_type: 'subtitle' | 'audio' | 'video' | 'attachment';
     profile?: string;
     pix_fmt?: string;
     width?: number;
@@ -44,6 +45,9 @@ export interface FFProbeData {
     tags?: {
       language?: string;
       title?: string;
+      // Attachments: the fonts an MKV's styled subtitles use.
+      filename?: string;
+      mimetype?: string;
     };
   }[];
   format: {
@@ -65,6 +69,8 @@ export type SubtitleSource =
       path: string;
       // ffmpeg -sub_charenc / libass charenc for text files that aren't UTF-8.
       charenc?: string;
+      // A folder of the fonts its styles use, for libass.
+      fontsDir?: string;
     }
   | {
       source: 'internal';
@@ -94,6 +100,29 @@ export function extractSubtitles(source: SubtitleSource, format: 'srt' | 'vtt'):
   }
   args.push('-f', format === 'vtt' ? 'webvtt' : 'srt', 'pipe:1');
   return runFfmpeg(args);
+}
+
+// Copies a text subtitle track to `out` (.ass keeps its styles, .srt converts any other
+// text codec), and attachments, by stream index, to the paths given. Reads the whole video.
+export async function copySubtitleTrack(
+  videoPath: string,
+  trackIndex: number,
+  out: string,
+  attachments: { index: number; path: string }[],
+  signal?: AbortSignal
+): Promise<void> {
+  const args = ['-v', 'error', '-y'];
+  for (const { index, path } of attachments) {
+    args.push(`-dump_attachment:${index}`, path);
+  }
+  args.push('-i', videoPath, '-map', `0:s:${trackIndex}`);
+  args.push('-c:s', extname(out) === '.ass' ? 'copy' : 'srt', out);
+  const { stderr } = await promisify(execFile)(ffmpegPath, args, { signal });
+  // A read cut short (the torrent dropped, its stream reset) is logged, but ffmpeg takes
+  // it as the end of the input and exits 0 with only the cues read so far.
+  if (/\[(?:https?|tcp) @|I\/O error|demux/i.test(stderr)) {
+    throw new Error(`Couldn’t read the whole subtitle track: ${stderr.trim()}`);
+  }
 }
 
 export async function getFfmpegVersion(): Promise<string> {
@@ -546,6 +575,9 @@ export function buildSubtitlesFilter(
   }
   if (spec.source === 'external' && spec.charenc) {
     parts.push(`charenc=${spec.charenc}`);
+  }
+  if (spec.source === 'external' && spec.fontsDir) {
+    parts.push(`fontsdir=${escapeFilterPath(spec.fontsDir)}`);
   }
   if (videoSize) {
     parts.push(`original_size=${videoSize.width}x${videoSize.height}`);
